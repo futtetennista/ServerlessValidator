@@ -7,5 +7,9 @@ provider:
 functions:
   foo:
     handler: handler.foo
+    events:
+      - http:
+          path: foo
+          method: get
   bar:
     handler: handler.bar

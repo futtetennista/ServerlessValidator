@@ -1,14 +1,14 @@
 #!/usr/bin/env stack
 -- stack --resolver lts-7.10 --install-ghc runghc --package yaml
 
+{-# OPTIONS_GHC -Wall #-}
+{-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DeriveGeneric #-}
 import Data.Yaml
-import Data.Aeson (genericParseJSON, defaultOptions)
-import Data.Aeson.Types (parseMaybe, typeMismatch, omitNothingFields)
-import GHC.Generics
+import Data.Aeson.Types (typeMismatch)
 import qualified Data.HashMap.Strict as Map (HashMap, insert, toList, empty)
 import qualified Data.Text as T (unpack)
+import qualified Data.Text.Internal (Text)
 
 
 data Serverless
@@ -18,10 +18,12 @@ data Serverless
       }
   deriving Show
 
+
 data Runtime
   = NodeJs4_3
   | NodeJs
   deriving Show
+
 
 data Provider
   = P { name :: String
@@ -41,8 +43,18 @@ data Function
       }
   deriving (Show)
 
+instance FromJSON Function where
+  parseJSON (Object o) =
+    return F <*> o .: "handler"
+
+  parseJSON invalid =
+    typeMismatch "Function" invalid
+
+
 instance FromJSON Functions where
-  parseJSON = functionsParser
+  parseJSON =
+    functionsParser
+
 
 instance FromJSON Provider where
   parseJSON (Object o) =
@@ -51,7 +63,9 @@ instance FromJSON Provider where
     <*> o .:? "memorySize"
     <*> o .:? "timeout"
 
-  parseJSON invalid = typeMismatch "Provide" invalid
+  parseJSON invalid =
+    typeMismatch "Provider" invalid
+
 
 instance FromJSON Serverless where
   parseJSON (Object o) =
@@ -59,53 +73,54 @@ instance FromJSON Serverless where
     <*> o .: "provider"
     <*> o .: "functions"
 
-  parseJSON invalid = typeMismatch "Serverless" invalid
+  parseJSON invalid =
+    typeMismatch "Serverless" invalid
+
 
 functionsParser :: Value -> Parser Functions
-functionsParser obj =
-  do
-    case obj of
-      Object o ->
-        let
-          fs =
-            Map.empty
+functionsParser value =
+  case value of
+    Object o ->
+      case (foldr parseFunction (Right Map.empty) $ Map.toList o) of
+        Right funcs ->
+          return $ FS funcs
 
-          function =
-            head $ Map.toList o
+        Left e ->
+          fail $ show e
 
-          k =
-            fst function
+    _ ->
+      typeMismatch "Functions" value
 
-          functionDefinition =
-            parseEither parseF (snd function)
-        in
-          case functionDefinition of
-            Right v ->
-                return $ FS (Map.insert (T.unpack k) v fs)
+  where
+    parseFunction :: (Data.Text.Internal.Text, Value) -> Either String (Map.HashMap String Function) -> Either String (Map.HashMap String Function)
+    parseFunction func acc =
+      case acc of
+        Left _ ->
+          acc
 
-            Left _ ->
-                typeMismatch "Function" $ snd function
+        Right dict ->
+          let
+            k =
+              T.unpack $ fst func
 
-      _ ->
-        typeMismatch "Functions" obj
+            body =
+              parseEither parseJSON (snd func)
+          in
+            case body of
+              Right v ->
+                Right $ Map.insert k v dict
 
-      where
-        -- This can be instance FromJSON Function where …
-        parseF :: Value -> Parser Function
-        parseF = \f ->
-          case f of
-            Object o ->
-              return F <*> o .: "handler"
+              Left e ->
+                Left e
 
-            _ ->
-              typeMismatch "Function" f
 
 d :: IO (Either ParseException Serverless)
 d =
-  decodeFileEither "sample.yml"
+  decodeFileEither "/Users/futtetennista/Developer/scripts/fixtures/serverless.yml"
+
 
 main :: IO ()
 main =
   do
     res <- d
-    putStrLn $ show res
+    print res
