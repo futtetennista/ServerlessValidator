@@ -1,0 +1,11 @@
+service: MyService
+
+provider:
+  name: foobar
+  runtime: nodejs
+
+functions:
+  foo:
+    handler: handler.foo
+  bar:
+    handler: handler.bar
