@@ -1,15 +1,21 @@
 #!/usr/bin/env stack
 -- stack --resolver lts-7.10 --install-ghc runghc --package yaml
 
+{-
+  - write posts about parsing dynamic json/yaml
+-}
+
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DeriveGeneric #-}
+
 import Data.Yaml
 import Data.Aeson.Types (typeMismatch)
 import qualified Data.HashMap.Strict as Map (HashMap, insert, toList, empty)
-import qualified Data.Text as T (unpack)
+import qualified Data.Text as T (unpack, splitOn)
 import qualified Data.Text.Internal (Text)
-
+import qualified Data.CaseInsensitive as CI (mk)
 
 data Serverless
   = S { service :: String
@@ -35,36 +41,37 @@ data Provider
 
 
 data Functions
-  = FS { fs :: Map.HashMap String Function }
+  = FS { fs :: Map.HashMap Data.Text.Internal.Text Function }
   deriving Show
 
 
 data Function
   = F { handler :: String
       , deployedFunctionName :: Maybe String
-      }
-  deriving (Show)
-
-
-data Events
-  = E { http :: Maybe [HttpEvent]
-      , streams :: Maybe [String]
-      , s3 :: Maybe [String]
-      , schedule :: Maybe [String]
-      , sns :: Maybe [String]
+      , events :: [Event]
       }
   deriving Show
 
 
-type Method = String
+data Event
+  = E { http :: Maybe Http
+      -- , streams :: Maybe [String]
+      -- , s3 :: Maybe [String]
+      -- , schedule :: Maybe [String]
+      -- , sns :: Maybe [String]
+      }
+  | Empty
+  deriving Show
+
+
 type Path = String
 
 
-data HttpEvent
-  = HTTPEvent { path :: String
-              , method :: HttpMethod
-              }
-  | Description Method Path
+data Http
+  = Obj { path :: Path
+        , method :: HttpMethod
+        }
+  | Str HttpMethod Path
   deriving Show
 
 
@@ -76,11 +83,76 @@ data HttpMethod
   | Patch
   deriving Show
 
+toHttpMethod :: Data.Text.Internal.Text -> Maybe HttpMethod
+toHttpMethod httpMethod =
+  case CI.mk httpMethod of
+    "get" ->
+      Just Get
+
+    "post" ->
+      Just Post
+
+    "put" ->
+      Just Put
+
+    "delete" ->
+      Just Delete
+
+    _ ->
+      Nothing
+
+instance FromJSON Event where
+  parseJSON (Object o) =
+    E <$> o .:? "http"
+    -- <*> o .:? "streams"
+    -- <*> o .:? "s3"
+    -- <*> o .:? "schedule"
+    -- <*> o .:? "sns"
+
+  parseJSON invalid =
+    typeMismatch "Event" invalid
+
+
+instance FromJSON HttpMethod where
+  parseJSON (String s) =
+    case toHttpMethod s of
+      Just httpMethod ->
+        return httpMethod
+
+      Nothing ->
+        fail "HTTP method must be a string"
+
+  parseJSON invalid =
+    typeMismatch "HttpMethod" invalid
+
+
+instance FromJSON Http where
+  parseJSON (Object o) =
+    Obj <$> o .: "path"
+    <*> o .: "method"
+
+  parseJSON (String config) =
+    case (T.splitOn " " config) of
+      [httpMethod, endpointPath] ->
+        case toHttpMethod $ httpMethod of
+          Just m ->
+            return $ Str m (T.unpack endpointPath)
+
+          Nothing ->
+            fail $ "'" ++ T.unpack httpMethod ++ "' is not a valid HTTP method"
+
+      _ ->
+        fail "string must contain a HTTP method and a path"
+
+  parseJSON invalid =
+    typeMismatch "Http" invalid
+
 
 instance FromJSON Function where
   parseJSON (Object o) =
     F <$> o .: "handler"
     <*> o .:? "deployedFunctionName"
+    <*> o .:? "events" .!= [Empty]
 
   parseJSON invalid =
     typeMismatch "Function" invalid
@@ -88,7 +160,7 @@ instance FromJSON Function where
 
 instance FromJSON Functions where
   parseJSON =
-    functionsParser
+    parseFunctions
 
 
 instance FromJSON Provider where
@@ -112,8 +184,8 @@ instance FromJSON Serverless where
     typeMismatch "Serverless" invalid
 
 
-functionsParser :: Value -> Parser Functions
-functionsParser value =
+parseFunctions :: Value -> Parser Functions
+parseFunctions value =
   case value of
     Object o ->
       case (foldr parseFunction (Right Map.empty) $ Map.toList o) of
@@ -127,7 +199,7 @@ functionsParser value =
       typeMismatch "Functions" value
 
   where
-    parseFunction :: (Data.Text.Internal.Text, Value) -> Either String (Map.HashMap String Function) -> Either String (Map.HashMap String Function)
+    parseFunction :: (Data.Text.Internal.Text, Value) -> Either String (Map.HashMap Data.Text.Internal.Text Function) -> Either String (Map.HashMap Data.Text.Internal.Text Function)
     parseFunction func acc =
       case acc of
         Left _ ->
@@ -136,7 +208,7 @@ functionsParser value =
         Right dict ->
           let
             k =
-              T.unpack $ fst func
+              fst func
 
             body =
               parseEither parseJSON (snd func)

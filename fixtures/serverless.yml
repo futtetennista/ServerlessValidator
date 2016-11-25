@@ -5,11 +5,17 @@ provider:
   runtime: nodejs
 
 functions:
-  foo:
-    handler: handler.foo
+  foo1:
+    handler: handler.foo1
     events:
+      - http: put foo
       - http:
           path: foo
           method: get
-  bar:
-    handler: handler.bar
+  foo2:
+    handler: handler.foo2
+    events:
+      - http: post foo2
+      - http:
+          method: get
+          path: foo2
