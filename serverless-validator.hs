@@ -33,19 +33,54 @@ data Provider
       }
   deriving Show
 
+
 data Functions
   = FS { fs :: Map.HashMap String Function }
   deriving Show
 
+
 data Function
   = F { handler :: String
-      --, deployedFunctionName :: Maybe String
+      , deployedFunctionName :: Maybe String
       }
   deriving (Show)
 
+
+data Events
+  = E { http :: Maybe [HttpEvent]
+      , streams :: Maybe [String]
+      , s3 :: Maybe [String]
+      , schedule :: Maybe [String]
+      , sns :: Maybe [String]
+      }
+  deriving Show
+
+
+type Method = String
+type Path = String
+
+
+data HttpEvent
+  = HTTPEvent { path :: String
+              , method :: HttpMethod
+              }
+  | Description Method Path
+  deriving Show
+
+
+data HttpMethod
+  = Get
+  | Post
+  | Put
+  | Delete
+  | Patch
+  deriving Show
+
+
 instance FromJSON Function where
   parseJSON (Object o) =
-    return F <*> o .: "handler"
+    F <$> o .: "handler"
+    <*> o .:? "deployedFunctionName"
 
   parseJSON invalid =
     typeMismatch "Function" invalid
