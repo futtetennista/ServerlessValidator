@@ -31,11 +31,19 @@ data Runtime
   deriving Show
 
 
+type Environment = (String, String)
+
+emptyEnvironment :: [Environment]
+emptyEnvironment =
+  []
+
+
 data Provider
   = P { name :: String
-      , runtime :: String
-      , memorySize :: Maybe Int
-      , timeout :: Maybe Int
+      , globalRuntime :: String
+      , globalMemorySize :: Maybe Int
+      , globalTimeout :: Maybe Int
+      , globalEnvironment :: [Environment]
       }
   deriving Show
 
@@ -47,7 +55,12 @@ data Functions
 
 data Function
   = F { handler :: String
-      , deployedFunctionName :: Maybe String
+      , deployedName :: Maybe String
+      , description :: Maybe String
+      , functionRuntime :: Maybe String
+      , functionMemorySize :: Maybe Int
+      , functionTimeout :: Maybe Int
+      , functionEnvironment :: [Environment]
       , events :: [Event]
       }
   deriving Show
@@ -151,7 +164,12 @@ instance FromJSON Http where
 instance FromJSON Function where
   parseJSON (Object o) =
     F <$> o .: "handler"
-    <*> o .:? "deployedFunctionName"
+    <*> o .:? "deployedName"
+    <*> o .:? "description"
+    <*> o .:? "functionRuntime"
+    <*> o .:? "functionMemorySize"
+    <*> o .:? "functionTimeout"
+    <*> o .:? "functionEnvironment" .!= emptyEnvironment
     <*> o .:? "events" .!= [Empty]
 
   parseJSON invalid =
@@ -169,6 +187,7 @@ instance FromJSON Provider where
     <*> o .: "runtime"
     <*> o .:? "memorySize"
     <*> o .:? "timeout"
+    <*> o .:? "environment" .!= emptyEnvironment
 
   parseJSON invalid =
     typeMismatch "Provider" invalid
