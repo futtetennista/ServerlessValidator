@@ -30,6 +30,18 @@ data Runtime
   | NodeJs
   deriving Show
 
+toRuntime :: Data.Text.Internal.Text -> Either String Runtime
+toRuntime runtime =
+  case runtime of
+    "nodejs" ->
+      Right NodeJs
+
+    "nodejs4.3" ->
+      Right NodeJs4_3
+
+    _ ->
+      Left $ "Unsupported runtime '" ++ T.unpack runtime ++ "'"
+
 
 type Environment = (String, String)
 
@@ -40,7 +52,7 @@ emptyEnvironment =
 
 data Provider
   = P { name :: String
-      , globalRuntime :: String
+      , globalRuntime :: Runtime
       , globalMemorySize :: Maybe Int
       , globalTimeout :: Maybe Int
       , globalEnvironment :: [Environment]
@@ -57,7 +69,7 @@ data Function
   = F { handler :: String
       , deployedName :: Maybe String
       , description :: Maybe String
-      , functionRuntime :: Maybe String
+      , functionRuntime :: Maybe Runtime
       , functionMemorySize :: Maybe Int
       , functionTimeout :: Maybe Int
       , functionEnvironment :: [Environment]
@@ -113,6 +125,20 @@ toHttpMethod httpMethod =
 
     _ ->
       Nothing
+
+
+instance FromJSON Runtime where
+  parseJSON (String r) =
+    case toRuntime r of
+      Right runtime ->
+        return runtime
+
+      Left e ->
+        fail e
+
+  parseJSON invalid =
+    typeMismatch "Runtime" invalid
+
 
 instance FromJSON Event where
   parseJSON (Object o) =
