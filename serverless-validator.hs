@@ -16,6 +16,7 @@ import qualified Data.HashMap.Strict as Map (HashMap, insert, toList, empty)
 import qualified Data.Text as T (unpack, splitOn)
 import qualified Data.Text.Internal (Text)
 import qualified Data.CaseInsensitive as CI (mk)
+import qualified System.Environment as S (getArgs)
 
 data Serverless
   = S { service :: String
@@ -266,13 +267,30 @@ parseFunctions value =
                 Left e
 
 
-d :: IO (Either ParseException Serverless)
-d =
-  decodeFileEither "/Users/futtetennista/Developer/scripts/fixtures/serverless.yml"
+d :: String -> IO (Either ParseException Serverless)
+d serverlessPath =
+  decodeFileEither serverlessPath
 
 
 main :: IO ()
 main =
   do
-    res <- d
-    print res
+    -- args <- S.getArgs
+    let args = ["fixtures/serverless.yml"]
+    case args of
+      [] ->
+        putStrLn "Usage: ./serverless-validator.hs /path/to/serverless.yml"
+
+      (p:_) ->
+        validate p
+
+  where
+    validate f =
+      do
+        res <- d f
+        case res of
+          Left msg ->
+            print msg
+
+          Right _ ->
+            putStrLn "The provided serverless.yml is valid"
