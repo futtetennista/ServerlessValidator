@@ -10,8 +10,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-import Data.Yaml
 import Data.Aeson.Types (typeMismatch)
+import Data.Yaml (FromJSON, Value (String, Object), Parser, ParseException, (.:), (.:?), (.!=))
+import qualified Data.Yaml as YML (parseEither, decodeFileEither, parseJSON)
 import qualified Data.HashMap.Strict as Map (HashMap, insert, toList, empty)
 import qualified Data.Text as T (unpack, splitOn)
 import qualified Data.Text.Internal (Text)
@@ -31,6 +32,7 @@ data Runtime
   | NodeJs
   deriving Show
 
+
 toRuntime :: Data.Text.Internal.Text -> Either String Runtime
 toRuntime runtime =
   case runtime of
@@ -45,6 +47,7 @@ toRuntime runtime =
 
 
 type Environment = (String, String)
+
 
 emptyEnvironment :: [Environment]
 emptyEnvironment =
@@ -214,7 +217,7 @@ instance FromJSON Provider where
     <*> o .: "runtime"
     <*> o .:? "memorySize"
     <*> o .:? "timeout"
-    <*> o .:? "environment" .!= emptyEnvironment
+    <*> o .:? "environment"  .!= emptyEnvironment
 
   parseJSON invalid =
     typeMismatch "Provider" invalid
@@ -257,7 +260,7 @@ parseFunctions value =
               fst func
 
             body =
-              parseEither parseJSON (snd func)
+              YML.parseEither YML.parseJSON (snd func)
           in
             case body of
               Right v ->
@@ -269,7 +272,7 @@ parseFunctions value =
 
 d :: String -> IO (Either ParseException Serverless)
 d serverlessPath =
-  decodeFileEither serverlessPath
+  YML.decodeFileEither serverlessPath
 
 
 main :: IO ()
