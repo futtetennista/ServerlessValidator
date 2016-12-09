@@ -69,6 +69,44 @@ data Functions
   deriving Show
 
 
+instance FromJSON Functions where
+  parseJSON value =
+    case value of
+      Object o ->
+        case (foldr parseFunction (Right Map.empty) $ Map.toList o) of
+          Right funcs ->
+            return $ FS funcs
+
+          Left e ->
+            fail $ show e
+
+      _ ->
+        typeMismatch "Functions" value
+
+    where
+      parseFunction ::
+        (Data.Text.Internal.Text, Value) -> Either String (Map.HashMap Data.Text.Internal.Text Function) -> Either String (Map.HashMap Data.Text.Internal.Text Function)
+      parseFunction func acc =
+        case acc of
+          Left _ ->
+            acc
+
+          Right dict ->
+            let
+              k =
+                fst func
+
+              body =
+                YML.parseEither YML.parseJSON (snd func)
+            in
+              case body of
+                Right v ->
+                  Right $ Map.insert k v dict
+
+                Left e ->
+                  Left e
+
+
 data Function
   = F { handler :: String
       , deployedName :: Maybe String
@@ -80,6 +118,21 @@ data Function
       , events :: [Event]
       }
   deriving Show
+
+
+instance FromJSON Function where
+  parseJSON (Object o) =
+    F <$> o .: "handler"
+    <*> o .:? "deployedName"
+    <*> o .:? "description"
+    <*> o .:? "functionRuntime"
+    <*> o .:? "functionMemorySize"
+    <*> o .:? "functionTimeout"
+    <*> o .:? "functionEnvironment" .!= emptyEnvironment
+    <*> o .:? "events" .!= [Empty]
+
+  parseJSON invalid =
+    typeMismatch "Function" invalid
 
 
 data Event
@@ -191,26 +244,6 @@ instance FromJSON Http where
     typeMismatch "Http" invalid
 
 
-instance FromJSON Function where
-  parseJSON (Object o) =
-    F <$> o .: "handler"
-    <*> o .:? "deployedName"
-    <*> o .:? "description"
-    <*> o .:? "functionRuntime"
-    <*> o .:? "functionMemorySize"
-    <*> o .:? "functionTimeout"
-    <*> o .:? "functionEnvironment" .!= emptyEnvironment
-    <*> o .:? "events" .!= [Empty]
-
-  parseJSON invalid =
-    typeMismatch "Function" invalid
-
-
-instance FromJSON Functions where
-  parseJSON =
-    parseFunctions
-
-
 instance FromJSON Provider where
   parseJSON (Object o) =
     P <$> o .: "name"
@@ -231,43 +264,6 @@ instance FromJSON Serverless where
 
   parseJSON invalid =
     typeMismatch "Serverless" invalid
-
-
-parseFunctions :: Value -> Parser Functions
-parseFunctions value =
-  case value of
-    Object o ->
-      case (foldr parseFunction (Right Map.empty) $ Map.toList o) of
-        Right funcs ->
-          return $ FS funcs
-
-        Left e ->
-          fail $ show e
-
-    _ ->
-      typeMismatch "Functions" value
-
-  where
-    parseFunction :: (Data.Text.Internal.Text, Value) -> Either String (Map.HashMap Data.Text.Internal.Text Function) -> Either String (Map.HashMap Data.Text.Internal.Text Function)
-    parseFunction func acc =
-      case acc of
-        Left _ ->
-          acc
-
-        Right dict ->
-          let
-            k =
-              fst func
-
-            body =
-              YML.parseEither YML.parseJSON (snd func)
-          in
-            case body of
-              Right v ->
-                Right $ Map.insert k v dict
-
-              Left e ->
-                Left e
 
 
 d :: String -> IO (Either ParseException Serverless)
