@@ -214,31 +214,28 @@ instance FromJSON Function where
     <*> o .:? "memorySize"
     <*> o .:? "timeout"
     <*> o .:? "environment" .!= emptyEnvironment
-    <*> o .:? "events" .!= [Empty]
+    <*> o .: "events"
 
   parseJSON invalid =
     typeMismatch "Function" invalid
 
 
+type Path = Text
+
+
 data Event
-  = E { http :: Maybe Http
-      -- , streams :: Maybe [String]
-      -- , s3 :: Maybe [String]
-      -- , schedule :: Maybe [String]
-      -- , sns :: Maybe [String]
-      }
-  | Empty
-  deriving Show
-
-
-type Path = String
-
-
-data Http
-  = Obj { path :: Path
-        , method :: HttpMethod
+  = Http { path :: Path
+         , method :: HttpMethod
+         , cors :: Maybe Bool
+         , private :: Maybe Bool
+         }
+  |  S3 { bucket :: Text
+        , event :: Text
+        , rules :: [Text]
         }
-  | Str HttpMethod Path
+  | Schedule
+  | Sns
+  | Stream
   deriving Show
 
 
@@ -251,70 +248,87 @@ data HttpMethod
   deriving Show
 
 
-instance FromJSON Http where
-  parseJSON (Object o) =
-    Obj <$> o .: "path"
-    <*> o .: "method"
+instance FromJSON Event where
+  parseJSON value =
+    withObject "Event" (\obj -> parseEvent $ Map.toList obj)  value
 
-  parseJSON (String config) =
-    case (T.splitOn " " config) of
-      [httpMethod, endpointPath] ->
-        case toHttpMethod $ httpMethod of
-          Just m ->
-            return $ Str m (T.unpack endpointPath)
+    where
+      parseEvent :: [(Text, Value)] -> Parser Event
+      parseEvent xs =
+        case xs of
+          [(k, v)] ->
+            case k of
+              "http" ->
+                parseHttp v
 
-          Nothing ->
-            fail $ "'" ++ T.unpack httpMethod ++ "' is not a valid HTTP method"
+              "s3" ->
+                undefined
 
-      _ ->
-        fail "string must contain a HTTP method and a path"
+              _ ->
+                undefined
+          _ ->
+            fail "Expected singleton list of an event name and event definition"
 
-  parseJSON invalid =
-    typeMismatch "Http" invalid
+      parseHttp :: Value -> Parser Event
+      parseHttp v =
+        case v of
+          String config ->
+            case (T.splitOn " " config) of
+              [httpMethod, endpointPath] ->
+                case toHttpMethod $ httpMethod of
+                  Right m ->
+                    return Http { path = endpointPath
+                                , method = m
+                                , cors = Nothing
+                                , private = Nothing
+                                }
+
+                  Left err ->
+                    fail $ "Unknown HTTP method: " ++ err
+
+              _ ->
+                fail "string must contain only a HTTP method and a path, i.e. http: GET foo"
+
+          Object obj ->
+            Http <$> obj .: "path"
+            <*> obj .: "method"
+            <*> obj .:? "cors"
+            <*> obj .:? "private"
+
+          _ ->
+            fail "Invalid HTTP object, double check your serverless.yml"
 
 
-toHttpMethod :: Data.Text.Internal.Text -> Maybe HttpMethod
+toHttpMethod :: Text -> Either String HttpMethod
 toHttpMethod httpMethod =
   case CI.mk httpMethod of
     "get" ->
-      Just Get
+      Right Get
 
     "post" ->
-      Just Post
+      Right Post
 
     "put" ->
-      Just Put
+      Right Put
 
     "delete" ->
-      Just Delete
+      Right Delete
 
-    _ ->
-      Nothing
+    str ->
+      Left $ show str
 
 
 instance FromJSON HttpMethod where
   parseJSON (String s) =
     case toHttpMethod s of
-      Just httpMethod ->
+      Right httpMethod ->
         return httpMethod
 
-      Nothing ->
-        fail "HTTP method must be a string"
+      Left err ->
+        fail $ "Unknown HTTP method: " ++ err
 
   parseJSON invalid =
     typeMismatch "HttpMethod" invalid
-
-
-instance FromJSON Event where
-  parseJSON (Object o) =
-    E <$> o .:? "http"
-    -- <*> o .:? "streams"
-    -- <*> o .:? "s3"
-    -- <*> o .:? "schedule"
-    -- <*> o .:? "sns"
-
-  parseJSON invalid =
-    typeMismatch "Event" invalid
 
 
 d :: String -> IO (Either ParseException Serverless)

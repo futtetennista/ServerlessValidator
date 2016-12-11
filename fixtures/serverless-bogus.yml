@@ -7,11 +7,13 @@ provider:
 functions:
   foo1:
     handler: handler.foo1
-    events:
-      - http: GET foo
+    http: put foo
+    path: foo
+    method: get
   foo2:
     handler: handler.foo2
     events:
+      - http: post foo2
       - http:
-          path: postit
-          method: POST
+          method: get
+          path: foo2
