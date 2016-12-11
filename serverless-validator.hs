@@ -188,51 +188,52 @@ instance FromJSON Functions where
 
 
 data Function =
-  F { handler :: String
-    , deployedName :: Maybe String
-    , description :: Maybe String
-    , runtime :: Maybe Runtime
-    , memorySize :: Maybe Int
-    , timeout :: Maybe Int
-    , environment :: [Environment]
-    , events :: [Event]
+  F { functionName :: Text
+    , functionHandler :: Text
+    , functionDeployedName :: Maybe Text
+    , functionDescription :: Maybe Text
+    , functionRuntime :: Maybe Runtime
+    , functionMemorySize :: Maybe Int
+    , functionTimeout :: Maybe Int
+    , functionEnvironment :: [Environment]
+    , functionEvents :: [Event]
     }
   deriving Show
 
 
 parseFunction :: Text -> Value -> Parser Function
 parseFunction fName fBody =
-  YML.parseJSON fBody
+  withObject "Function" (\fObj -> parseFunction' fObj) fBody
 
+  where
+    parseFunction' :: Object -> Parser Function
+    parseFunction' obj =
+      F <$> parseFunctionName
+      <*> obj .: "handler"
+      <*> obj .:? "deployedName"
+      <*> obj .:? "description"
+      <*> obj .:? "runtime"
+      <*> obj .:? "memorySize"
+      <*> obj .:? "timeout"
+      <*> obj .:? "environment" .!= emptyEnvironment
+      <*> obj .: "events"
 
-instance FromJSON Function where
-  parseJSON (Object o) =
-    F <$> o .: "handler"
-    <*> o .:? "deployedName"
-    <*> o .:? "description"
-    <*> o .:? "runtime"
-    <*> o .:? "memorySize"
-    <*> o .:? "timeout"
-    <*> o .:? "environment" .!= emptyEnvironment
-    <*> o .: "events"
-
-  parseJSON invalid =
-    typeMismatch "Function" invalid
-
+    parseFunctionName =
+      return fName
 
 type Path = Text
 
 
 data Event
-  = Http { path :: Path
-         , method :: HttpMethod
-         , cors :: Maybe Bool
-         , private :: Maybe Bool
+  = Http { httpPath :: Path
+         , httpMethod :: HttpMethod
+         , httpCors :: Maybe Bool
+         , httpPrivate :: Maybe Bool
          }
-  |  S3 { bucket :: Text
-        , event :: Text
-        , rules :: [Text]
-        }
+  | S3 { bucket :: Text
+       , event :: Text
+       , rules :: [Text]
+       }
   | Schedule
   | Sns
   | Stream
@@ -270,38 +271,36 @@ instance FromJSON Event where
             fail "Expected singleton list of an event name and event definition"
 
       parseHttp :: Value -> Parser Event
-      parseHttp v =
-        case v of
-          String config ->
+      parseHttp (String config) =
             case (T.splitOn " " config) of
-              [httpMethod, endpointPath] ->
-                case toHttpMethod $ httpMethod of
+              [httpMethodStr, httpEndpoint] ->
+                case toHttpMethod $ httpMethodStr of
                   Right m ->
-                    return Http { path = endpointPath
-                                , method = m
-                                , cors = Nothing
-                                , private = Nothing
+                    return Http { httpPath = httpEndpoint
+                                , httpMethod = m
+                                , httpCors = Nothing
+                                , httpPrivate = Nothing
                                 }
 
                   Left err ->
                     fail $ "Unknown HTTP method: " ++ err
 
               _ ->
-                fail "string must contain only a HTTP method and a path, i.e. http: GET foo"
+                fail "HTTP string must contain only a HTTP method and a path, i.e. 'http: GET foo'"
 
-          Object obj ->
-            Http <$> obj .: "path"
-            <*> obj .: "method"
-            <*> obj .:? "cors"
-            <*> obj .:? "private"
+      parseHttp (Object obj) =
+        Http <$> obj .: "path"
+        <*> obj .: "method"
+        <*> obj .:? "cors"
+        <*> obj .:? "private"
 
-          _ ->
-            fail "Invalid HTTP object, double check your serverless.yml"
+      parseHttp _ =
+        fail "Invalid HTTP object, double check your serverless.yml"
 
 
 toHttpMethod :: Text -> Either String HttpMethod
-toHttpMethod httpMethod =
-  case CI.mk httpMethod of
+toHttpMethod httpMethodStr =
+  case CI.mk httpMethodStr of
     "get" ->
       Right Get
 
@@ -319,10 +318,10 @@ toHttpMethod httpMethod =
 
 
 instance FromJSON HttpMethod where
-  parseJSON (String s) =
-    case toHttpMethod s of
-      Right httpMethod ->
-        return httpMethod
+  parseJSON (String str) =
+    case toHttpMethod str of
+      Right m ->
+        return m
 
       Left err ->
         fail $ "Unknown HTTP method: " ++ err
