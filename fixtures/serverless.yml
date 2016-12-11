@@ -9,6 +9,7 @@ functions:
     handler: handler.foo1
     events:
       - http: GET foo
+
   foo2:
     handler: handler.foo2
     events:

@@ -1,92 +1,20 @@
 #!/usr/bin/env stack
 -- stack --resolver lts-7.10 --install-ghc runghc --package yaml
 
-{-
-- write posts about parsing dynamic json/yaml
-
-
-I'm trying to parse the following JSON:
-
-"foo" {
-  "bars" {
-    "bar1": {
-      "a": 123,
-      "b": "red",
-      …
-    },
-    "bar2": {
-      "a": 345,
-      "b": "blue",
-      …
-    }
-    …
-  }
-}
-
-One thing to note is that  the internal structure of the objects "baz" and "bar" is known, so I can write a data type for them,
-but their name is not and there. In my current working implementation I get the "bars" aeson object, get its hashmap representation
-and then use foldr to return a hashmap where the keys are the object names and the values their bodies. The thing that bugs me
-in this implementation is that, in order to make my parser fail if something is wrong in the "bars" object, I have to use a Either
-type while folding and this makes it a bit ugly. So this is how the FromJSON instance looks like for the type Bars:
-
-```
-instance FromJSON Bars where
-  parseJSON value =
-    case value of
-      Object o ->
-        case (foldr parseBars (Right HashMap.empty) $ HashMap.toList o) of
-          Right bars ->
-            return $ Bars bars
-
-          Left e ->
-            fail $ show e
-
-      _ ->
-        typeMismatch "Bars" value
-
-  where
-    parseBar :: (Text, Value) -> Either String (HashMap Text Bar) -> Either String (Map.HashMap Text Bar)
-    …
-```
-
-Ideally I'd like to have a function that applies the Bar parser N times and fails if parsing any of the objects fails. So something like:
-
-```
-many1 $ parseJSON bar
-```
-
-but I don't see how I can achieve that since the content inside "bars" is an aeson Object - that is a hash map.
-
-
-Can anyone suggest any idea to a better solution to this problem?
-
-
-
-Idea 1:
-Achieve something like:
-```many1 $ YML.parseJSON funcs```
-
-Issue: funcs have type [(Text, Value)], that is N values, but parseJSON requires ONE Value type
-1. fold all values in one value => didn't understand how to do it, dunno if it's possible
-
--}
-
--- Serverless.yml reference: https://serverless.com/framework/docs/providers/aws/guide/serverless.yml/
-
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveGeneric #-}
 
+-- Serverless.yml reference: https://serverless.com/framework/docs/providers/aws/guide/serverless.yml/
 
 import Data.Text.Internal (Text)
 import Data.Traversable (for)
 import Control.Monad (forM_)
 import Data.Aeson.Types (Object, typeMismatch, withObject)
 import Data.Yaml (FromJSON, Value (String, Object), Parser, ParseException, (.:), (.:?), (.!=))
-import qualified Data.Yaml as YML (parseEither, decodeFileEither, parseJSON)
-import qualified Data.Attoparsec.ByteString as P
-import qualified Data.HashMap.Strict as Map (HashMap, insert, toList, empty)
+import qualified Data.Yaml as YML (decodeFileEither, parseJSON)
+import qualified Data.HashMap.Strict as Map (toList)
 import qualified Data.Text as T (unpack, splitOn)
 import qualified Data.CaseInsensitive as CI (mk)
 import qualified System.Environment as S (getArgs)
@@ -152,10 +80,10 @@ emptyEnvironment =
 
 data Provider
   = P { name :: String
-      -- , globalRuntime :: Runtime
-      -- , globalMemorySize :: Maybe Int
-      -- , globalTimeout :: Maybe Int
-      -- , globalEnvironment :: [Environment]
+      , globalRuntime :: Runtime
+      , globalMemorySize :: Maybe Int
+      , globalTimeout :: Maybe Int
+      , globalEnvironment :: [Environment]
       }
   deriving Show
 
@@ -163,10 +91,10 @@ data Provider
 instance FromJSON Provider where
   parseJSON (Object o) =
     P <$> o .: "name"
-    -- <*> o .: "runtime"
-    -- <*> o .:? "memorySize"
-    -- <*> o .:? "timeout"
-    -- <*> o .:? "environment"  .!= emptyEnvironment
+    <*> o .: "runtime"
+    <*> o .:? "memorySize"
+    <*> o .:? "timeout"
+    <*> o .:? "environment" .!= emptyEnvironment
 
   parseJSON invalid =
     typeMismatch "Provider" invalid
@@ -330,8 +258,8 @@ instance FromJSON HttpMethod where
     typeMismatch "HttpMethod" invalid
 
 
-d :: String -> IO (Either ParseException Serverless)
-d serverlessPath =
+decode :: String -> IO (Either ParseException Serverless)
+decode serverlessPath =
   YML.decodeFileEither serverlessPath
 
 
@@ -352,7 +280,7 @@ main =
   where
     validate f =
       do
-        res <- d f
+        res <- decode f
         case res of
           Left msg ->
             print msg
