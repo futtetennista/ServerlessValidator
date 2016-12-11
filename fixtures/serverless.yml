@@ -8,7 +8,6 @@ functions:
   foo1:
     handler: handler.foo1
     events:
-      - http: put foo
       - http:
           path: foo
           method: get
@@ -16,6 +15,3 @@ functions:
     handler: handler.foo2
     events:
       - http: post foo2
-      - http:
-          method: get
-          path: foo2

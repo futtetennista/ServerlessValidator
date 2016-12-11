@@ -2,22 +2,95 @@
 -- stack --resolver lts-7.10 --install-ghc runghc --package yaml
 
 {-
-  - write posts about parsing dynamic json/yaml
+- write posts about parsing dynamic json/yaml
+
+
+I'm trying to parse the following JSON:
+
+"foo" {
+  "bars" {
+    "bar1": {
+      "a": 123,
+      "b": "red",
+      …
+    },
+    "bar2": {
+      "a": 345,
+      "b": "blue",
+      …
+    }
+    …
+  }
+}
+
+One thing to note is that  the internal structure of the objects "baz" and "bar" is known, so I can write a data type for them,
+but their name is not and there. In my current working implementation I get the "bars" aeson object, get its hashmap representation
+and then use foldr to return a hashmap where the keys are the object names and the values their bodies. The thing that bugs me
+in this implementation is that, in order to make my parser fail if something is wrong in the "bars" object, I have to use a Either
+type while folding and this makes it a bit ugly. So this is how the FromJSON instance looks like for the type Bars:
+
+```
+instance FromJSON Bars where
+  parseJSON value =
+    case value of
+      Object o ->
+        case (foldr parseBars (Right HashMap.empty) $ HashMap.toList o) of
+          Right bars ->
+            return $ Bars bars
+
+          Left e ->
+            fail $ show e
+
+      _ ->
+        typeMismatch "Bars" value
+
+  where
+    parseBar :: (Text, Value) -> Either String (HashMap Text Bar) -> Either String (Map.HashMap Text Bar)
+    …
+```
+
+Ideally I'd like to have a function that applies the Bar parser N times and fails if parsing any of the objects fails. So something like:
+
+```
+many1 $ parseJSON bar
+```
+
+but I don't see how I can achieve that since the content inside "bars" is an aeson Object - that is a hash map.
+
+
+Can anyone suggest any idea to a better solution to this problem?
+
+
+
+Idea 1:
+Achieve something like:
+```many1 $ YML.parseJSON funcs```
+
+Issue: funcs have type [(Text, Value)], that is N values, but parseJSON requires ONE Value type
+1. fold all values in one value => didn't understand how to do it, dunno if it's possible
+
 -}
+
+-- Serverless.yml reference: https://serverless.com/framework/docs/providers/aws/guide/serverless.yml/
 
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-import Data.Aeson.Types (typeMismatch)
+
+import Data.Text.Internal (Text)
+import Data.Traversable (for)
+import Control.Monad (forM_)
+import Data.Aeson.Types (Object, typeMismatch, withObject)
 import Data.Yaml (FromJSON, Value (String, Object), Parser, ParseException, (.:), (.:?), (.!=))
 import qualified Data.Yaml as YML (parseEither, decodeFileEither, parseJSON)
+import qualified Data.Attoparsec.ByteString as P
 import qualified Data.HashMap.Strict as Map (HashMap, insert, toList, empty)
 import qualified Data.Text as T (unpack, splitOn)
-import qualified Data.Text.Internal (Text)
 import qualified Data.CaseInsensitive as CI (mk)
 import qualified System.Environment as S (getArgs)
+
 
 data Serverless
   = S { service :: String
@@ -27,15 +100,38 @@ data Serverless
   deriving Show
 
 
+instance FromJSON Serverless where
+  parseJSON (Object o) =
+    S <$> o .: "service"
+    <*> o .: "provider"
+    <*> o .: "functions"
+
+  parseJSON invalid =
+    typeMismatch "Serverless" invalid
+
+
 data Runtime
   = NodeJs4_3
   | NodeJs
   deriving Show
 
 
+instance FromJSON Runtime where
+  parseJSON (String r) =
+    case toRuntime r of
+      Right rt ->
+        return rt
+
+      Left e ->
+        fail e
+
+  parseJSON invalid =
+    typeMismatch "Runtime" invalid
+
+
 toRuntime :: Data.Text.Internal.Text -> Either String Runtime
-toRuntime runtime =
-  case runtime of
+toRuntime rt =
+  case rt of
     "nodejs" ->
       Right NodeJs
 
@@ -43,7 +139,7 @@ toRuntime runtime =
       Right NodeJs4_3
 
     _ ->
-      Left $ "Unsupported runtime '" ++ T.unpack runtime ++ "'"
+      Left $ "Unsupported runtime '" ++ T.unpack rt ++ "'"
 
 
 type Environment = (String, String)
@@ -56,68 +152,57 @@ emptyEnvironment =
 
 data Provider
   = P { name :: String
-      , globalRuntime :: Runtime
-      , globalMemorySize :: Maybe Int
-      , globalTimeout :: Maybe Int
-      , globalEnvironment :: [Environment]
+      -- , globalRuntime :: Runtime
+      -- , globalMemorySize :: Maybe Int
+      -- , globalTimeout :: Maybe Int
+      -- , globalEnvironment :: [Environment]
       }
   deriving Show
 
 
-data Functions
-  = FS { fs :: Map.HashMap Data.Text.Internal.Text Function }
+instance FromJSON Provider where
+  parseJSON (Object o) =
+    P <$> o .: "name"
+    -- <*> o .: "runtime"
+    -- <*> o .:? "memorySize"
+    -- <*> o .:? "timeout"
+    -- <*> o .:? "environment"  .!= emptyEnvironment
+
+  parseJSON invalid =
+    typeMismatch "Provider" invalid
+
+
+newtype Functions =
+  FS [Function]
   deriving Show
 
 
 instance FromJSON Functions where
   parseJSON value =
-    case value of
-      Object o ->
-        case (foldr parseFunction (Right Map.empty) $ Map.toList o) of
-          Right funcs ->
-            return $ FS funcs
-
-          Left e ->
-            fail $ show e
-
-      _ ->
-        typeMismatch "Functions" value
+    withObject "Functions" parseFunctions value
 
     where
-      parseFunction ::
-        (Data.Text.Internal.Text, Value) -> Either String (Map.HashMap Data.Text.Internal.Text Function) -> Either String (Map.HashMap Data.Text.Internal.Text Function)
-      parseFunction func acc =
-        case acc of
-          Left _ ->
-            acc
-
-          Right dict ->
-            let
-              k =
-                fst func
-
-              body =
-                YML.parseEither YML.parseJSON (snd func)
-            in
-              case body of
-                Right v ->
-                  Right $ Map.insert k v dict
-
-                Left e ->
-                  Left e
+      parseFunctions :: Object -> Parser Functions
+      parseFunctions obj =
+        fmap FS . for (Map.toList obj) $ \(n, v) -> parseFunction n v
 
 
-data Function
-  = F { handler :: String
-      , deployedName :: Maybe String
-      , description :: Maybe String
-      , functionRuntime :: Maybe Runtime
-      , functionMemorySize :: Maybe Int
-      , functionTimeout :: Maybe Int
-      , functionEnvironment :: [Environment]
-      , events :: [Event]
-      }
+data Function =
+  F { handler :: String
+    , deployedName :: Maybe String
+    , description :: Maybe String
+    , runtime :: Maybe Runtime
+    , memorySize :: Maybe Int
+    , timeout :: Maybe Int
+    , environment :: [Environment]
+    , events :: [Event]
+    }
   deriving Show
+
+
+parseFunction :: Text -> Value -> Parser Function
+parseFunction fName fBody =
+  YML.parseJSON fBody
 
 
 instance FromJSON Function where
@@ -125,10 +210,10 @@ instance FromJSON Function where
     F <$> o .: "handler"
     <*> o .:? "deployedName"
     <*> o .:? "description"
-    <*> o .:? "functionRuntime"
-    <*> o .:? "functionMemorySize"
-    <*> o .:? "functionTimeout"
-    <*> o .:? "functionEnvironment" .!= emptyEnvironment
+    <*> o .:? "runtime"
+    <*> o .:? "memorySize"
+    <*> o .:? "timeout"
+    <*> o .:? "environment" .!= emptyEnvironment
     <*> o .:? "events" .!= [Empty]
 
   parseJSON invalid =
@@ -165,62 +250,6 @@ data HttpMethod
   | Patch
   deriving Show
 
-toHttpMethod :: Data.Text.Internal.Text -> Maybe HttpMethod
-toHttpMethod httpMethod =
-  case CI.mk httpMethod of
-    "get" ->
-      Just Get
-
-    "post" ->
-      Just Post
-
-    "put" ->
-      Just Put
-
-    "delete" ->
-      Just Delete
-
-    _ ->
-      Nothing
-
-
-instance FromJSON Runtime where
-  parseJSON (String r) =
-    case toRuntime r of
-      Right runtime ->
-        return runtime
-
-      Left e ->
-        fail e
-
-  parseJSON invalid =
-    typeMismatch "Runtime" invalid
-
-
-instance FromJSON Event where
-  parseJSON (Object o) =
-    E <$> o .:? "http"
-    -- <*> o .:? "streams"
-    -- <*> o .:? "s3"
-    -- <*> o .:? "schedule"
-    -- <*> o .:? "sns"
-
-  parseJSON invalid =
-    typeMismatch "Event" invalid
-
-
-instance FromJSON HttpMethod where
-  parseJSON (String s) =
-    case toHttpMethod s of
-      Just httpMethod ->
-        return httpMethod
-
-      Nothing ->
-        fail "HTTP method must be a string"
-
-  parseJSON invalid =
-    typeMismatch "HttpMethod" invalid
-
 
 instance FromJSON Http where
   parseJSON (Object o) =
@@ -244,26 +273,48 @@ instance FromJSON Http where
     typeMismatch "Http" invalid
 
 
-instance FromJSON Provider where
-  parseJSON (Object o) =
-    P <$> o .: "name"
-    <*> o .: "runtime"
-    <*> o .:? "memorySize"
-    <*> o .:? "timeout"
-    <*> o .:? "environment"  .!= emptyEnvironment
+toHttpMethod :: Data.Text.Internal.Text -> Maybe HttpMethod
+toHttpMethod httpMethod =
+  case CI.mk httpMethod of
+    "get" ->
+      Just Get
+
+    "post" ->
+      Just Post
+
+    "put" ->
+      Just Put
+
+    "delete" ->
+      Just Delete
+
+    _ ->
+      Nothing
+
+
+instance FromJSON HttpMethod where
+  parseJSON (String s) =
+    case toHttpMethod s of
+      Just httpMethod ->
+        return httpMethod
+
+      Nothing ->
+        fail "HTTP method must be a string"
 
   parseJSON invalid =
-    typeMismatch "Provider" invalid
+    typeMismatch "HttpMethod" invalid
 
 
-instance FromJSON Serverless where
+instance FromJSON Event where
   parseJSON (Object o) =
-    S <$> o .: "service"
-    <*> o .: "provider"
-    <*> o .: "functions"
+    E <$> o .:? "http"
+    -- <*> o .:? "streams"
+    -- <*> o .:? "s3"
+    -- <*> o .:? "schedule"
+    -- <*> o .:? "sns"
 
   parseJSON invalid =
-    typeMismatch "Serverless" invalid
+    typeMismatch "Event" invalid
 
 
 d :: String -> IO (Either ParseException Serverless)
@@ -275,13 +326,15 @@ main :: IO ()
 main =
   do
     -- args <- S.getArgs
-    let args = ["fixtures/serverless.yml"]
+    let args = [ "fixtures/serverless.yml"
+               , "fixtures/serverless-bogus.yml"
+               ]
     case args of
       [] ->
         putStrLn "Usage: ./serverless-validator.hs /path/to/serverless.yml"
 
-      (p:_) ->
-        validate p
+      xs ->
+        forM_ xs validate
 
   where
     validate f =
@@ -291,5 +344,7 @@ main =
           Left msg ->
             print msg
 
-          Right _ ->
-            putStrLn "The provided serverless.yml is valid"
+          Right serverless ->
+            do
+              print serverless
+              putStrLn $ "The provided file '" ++ f ++ "' is valid"
