@@ -131,12 +131,12 @@ data Function =
 
 parseFunction :: Text -> Value -> Parser Function
 parseFunction fName fBody =
-  withObject "Function" (\fObj -> parseFunction' fObj) fBody
+  withObject "Function" (\fObj -> parseFunctionBody fObj) fBody
 
   where
-    parseFunction' :: Object -> Parser Function
-    parseFunction' obj =
-      F <$> parseFunctionName
+    parseFunctionBody :: Object -> Parser Function
+    parseFunctionBody obj =
+      F <$> return fName
       <*> obj .: "handler"
       <*> obj .:? "deployedName"
       <*> obj .:? "description"
@@ -146,8 +146,6 @@ parseFunction fName fBody =
       <*> obj .:? "environment" .!= emptyEnvironment
       <*> obj .: "events"
 
-    parseFunctionName =
-      return fName
 
 type Path = Text
 
