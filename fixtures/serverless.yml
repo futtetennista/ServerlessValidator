@@ -16,3 +16,13 @@ functions:
       - http:
           path: postit
           method: POST
+
+  foo3:
+    handler: handler.foo2
+    events:
+      - s3:
+          bucket: test
+          event: foo
+          rules:
+            - prefix: foo/
+            - suffix: .bar

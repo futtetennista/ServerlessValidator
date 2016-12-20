@@ -151,18 +151,19 @@ type Path = Text
 
 
 data Event
-  = Http { httpPath :: Path
-         , httpMethod :: HttpMethod
-         , httpCors :: Maybe Bool
-         , httpPrivate :: Maybe Bool
-         }
-  | S3 { bucket :: Text
-       , event :: Text
-       , rules :: [Text]
-       }
-  | Schedule
-  | Sns
-  | Stream
+  = HttpEvent { httpEventPath :: Path
+              , httpEventMethod :: HttpMethod
+              , httpEventCors :: Maybe Bool
+              , httpEventPrivate :: Maybe Bool
+              }
+  | S3Event { s3EventBucket :: Text
+            , s3EventEvent :: Text
+            , s3EventRules :: Maybe [S3EventRule]
+            }
+  | ScheduleEvent
+  | SnsEvent
+  | StreamEvent
+  | EmptyEvent Text
   deriving Show
 
 
@@ -175,6 +176,30 @@ data HttpMethod
   deriving Show
 
 
+data S3EventRule
+  = Prefix Text
+  | Suffix Text
+  deriving Show
+
+
+instance FromJSON S3EventRule where
+  parseJSON value =
+    withObject "S3 Event Rule" (\obj -> parseRule $ Map.toList obj) value
+
+    where
+      parseRule :: [(Text, Value)] -> Parser S3EventRule
+      parseRule entries =
+        case entries of
+          [("suffix", String suffix)] ->
+            return $ Suffix suffix
+
+          [("prefix", String prefix)] ->
+            return $ Prefix prefix
+
+          _ ->
+            typeMismatch "'prefix' or 'suffix' string" value
+
+
 instance FromJSON Event where
   parseJSON value =
     withObject "Event" (\obj -> parseEvent $ Map.toList obj)  value
@@ -183,45 +208,62 @@ instance FromJSON Event where
       parseEvent :: [(Text, Value)] -> Parser Event
       parseEvent xs =
         case xs of
-          [(k, v)] ->
-            case k of
+          [(eventName, eventConfig)] ->
+            case eventName of
               "http" ->
-                parseHttp v
+                parseHttpEvent eventConfig
 
               "s3" ->
-                undefined
+                parseS3Event eventConfig
 
               _ ->
-                undefined
+                return $ EmptyEvent eventName
+
           _ ->
-            fail "Expected singleton list of an event name and event definition"
+            typeMismatch "Event" value
 
-      parseHttp :: Value -> Parser Event
-      parseHttp (String config) =
-            case (T.splitOn " " config) of
-              [httpMethodStr, httpEndpoint] ->
-                case toHttpMethod $ httpMethodStr of
-                  Right m ->
-                    return Http { httpPath = httpEndpoint
-                                , httpMethod = m
-                                , httpCors = Nothing
-                                , httpPrivate = Nothing
-                                }
 
-                  Left err ->
-                    fail $ "Unknown HTTP method: " ++ err
+parseS3Event :: Value -> Parser Event
+parseS3Event (Object o) =
+  S3Event <$> o .: "bucket"
+  <*> parseEventType
+  <*> o .:? "rules" .!= Just []
+  where
+    -- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
+    parseEventType :: Parser Text
+    parseEventType =
+      o .: "event"
 
-              _ ->
-                fail "HTTP string must contain only a HTTP method and a path, i.e. 'http: GET foo'"
+parseS3Event invalid =
+  typeMismatch "S3Event" invalid
 
-      parseHttp (Object obj) =
-        Http <$> obj .: "path"
-        <*> obj .: "method"
-        <*> obj .:? "cors"
-        <*> obj .:? "private"
 
-      parseHttp _ =
-        fail "Invalid HTTP object, double check your serverless.yml"
+parseHttpEvent :: Value -> Parser Event
+parseHttpEvent (String config) =
+  case (T.splitOn " " config) of
+    [httpMethodStr, httpEndpoint] ->
+      case toHttpMethod $ httpMethodStr of
+        Right m ->
+          return HttpEvent { httpEventPath = httpEndpoint
+                           , httpEventMethod = m
+                           , httpEventCors = Nothing
+                           , httpEventPrivate = Nothing
+                           }
+
+        Left err ->
+          fail $ "Unknown HTTP method: " ++ err
+
+    _ ->
+      fail "HTTP string must contain only a HTTP method and a path, i.e. 'http: GET foo'"
+
+parseHttpEvent (Object obj) =
+  HttpEvent <$> obj .: "path"
+  <*> obj .: "method"
+  <*> obj .:? "cors"
+  <*> obj .:? "private"
+
+parseHttpEvent invalid =
+  typeMismatch "HTTP Event" invalid
 
 
 toHttpMethod :: Text -> Either String HttpMethod
@@ -264,7 +306,7 @@ decode serverlessPath =
 main :: IO ()
 main =
   do
-    -- args <- S.getArgs
+    args <- S.getArgs
     let args = [ "fixtures/serverless.yml"
                , "fixtures/serverless-bogus.yml"
                ]
