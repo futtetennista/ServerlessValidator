@@ -158,7 +158,7 @@ data Event
               }
   | S3Event { s3EventBucket :: Text
             , s3EventEvent :: Text
-            , s3EventRules :: Maybe [S3EventRule]
+            , s3EventRules :: [S3EventRule]
             }
   | ScheduleEvent
   | SnsEvent
@@ -227,7 +227,7 @@ parseS3Event :: Value -> Parser Event
 parseS3Event (Object o) =
   S3Event <$> o .: "bucket"
   <*> parseEventType
-  <*> o .:? "rules" .!= Just []
+  <*> o .:? "rules" .!= []
   where
     -- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
     parseEventType :: Parser Text
@@ -235,7 +235,7 @@ parseS3Event (Object o) =
       o .: "event"
 
 parseS3Event invalid =
-  typeMismatch "S3Event" invalid
+  typeMismatch "S3 Event" invalid
 
 
 parseHttpEvent :: Value -> Parser Event
