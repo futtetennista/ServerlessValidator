@@ -15,7 +15,7 @@ import Data.Aeson.Types (Object, typeMismatch, withObject)
 import Data.Yaml (FromJSON, Value (String, Object), Parser, ParseException, (.:), (.:?), (.!=))
 import qualified Data.Yaml as YML (decodeFileEither, parseJSON)
 import qualified Data.HashMap.Strict as Map (toList)
-import qualified Data.Text as T (unpack, splitOn)
+import qualified Data.Text as T (unpack, splitOn, concat, empty)
 import qualified Data.CaseInsensitive as CI (mk)
 import qualified System.Environment as S (getArgs)
 import qualified Data.Maybe as Maybe (isJust)
@@ -326,11 +326,22 @@ main =
           Right serverless ->
             do
               print serverless
-              let validations =
-                    and [ validateS3EventArn $ toS3Events serverless
-                        ]
+              let
+                s3EventsValidationRes =
+                  validateS3EventArn $ toS3Events serverless
+
+                validations =
+                    all fst [ s3EventsValidationRes ]
+
               when validations (putStrLn $ "The provided file '" ++ f ++ "' is valid")
-              unless validations (putStrLn $ "The provided file '" ++ f ++ "' is not valid")
+              unless validations (do
+                                     putStrLn $ "Validation of file '" ++ f ++ "' failed:"
+                                     printErrors (snd s3EventsValidationRes)
+                                 )
+
+    printErrors :: [Text] -> IO ()
+    printErrors errs =
+      forM_ errs (\msg -> putStrLn $ "- " ++ T.unpack msg)
 
     toS3Events :: Serverless -> [Event]
     toS3Events serverless =
@@ -347,19 +358,40 @@ main =
           False
 
     -- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
-    validateS3EventArn :: [Event] -> Bool
-    validateS3EventArn [] =
-      True
-
+    validateS3EventArn :: [Event] -> (Bool, [Text])
     validateS3EventArn s3Events =
-      and $ flip map s3Events (\s3Event ->
-                               case s3Event of
-                                 S3Event _ e _ ->
-                                   Maybe.isJust $ Regex.matchRegex s3ArnRegex (T.unpack e)
+      case filter left (flip map s3Events validateS3EventArn') of
+        [] ->
+          (True, [])
 
-                                 _ ->
-                                   False)
+        xs ->
+          (False, flip map xs $ either id (\_ -> T.empty))
+
       where
+        validateS3EventArn' s3Event =
+          case s3Event of
+            S3Event _ e _ ->
+              case Regex.matchRegex s3ArnRegex (T.unpack e) of
+                Nothing ->
+                  Left $ T.concat [ "'"
+                                  , e
+                                  ,"' is not a valid s3 arn"
+                                  ]
+
+                Just _ ->
+                  Right ()
+
+            _ ->
+              Left "Not an S3 Event"
+
+        left res =
+          case res of
+            Left _ ->
+              True
+
+            Right _ ->
+              False
+
         objCreatedRegex =
           "ObjectCreated:(\\*|Put|Post|Copy|CompleteMultipartUpload)"
 
