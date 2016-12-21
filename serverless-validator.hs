@@ -10,7 +10,7 @@
 
 import Data.Text.Internal (Text)
 import Data.Traversable (for)
-import Control.Monad (forM_)
+import Control.Monad (forM_, when, unless)
 import Data.Aeson.Types (Object, typeMismatch, withObject)
 import Data.Yaml (FromJSON, Value (String, Object), Parser, ParseException, (.:), (.:?), (.!=))
 import qualified Data.Yaml as YML (decodeFileEither, parseJSON)
@@ -18,6 +18,8 @@ import qualified Data.HashMap.Strict as Map (toList)
 import qualified Data.Text as T (unpack, splitOn)
 import qualified Data.CaseInsensitive as CI (mk)
 import qualified System.Environment as S (getArgs)
+import qualified Data.Maybe as Maybe (isJust)
+import qualified Text.Regex as Regex (mkRegex, matchRegex)
 
 
 data Serverless
@@ -101,7 +103,7 @@ instance FromJSON Provider where
 
 
 newtype Functions =
-  FS [Function]
+  FS { getFunctions :: [Function] }
   deriving Show
 
 
@@ -226,13 +228,9 @@ instance FromJSON Event where
 parseS3Event :: Value -> Parser Event
 parseS3Event (Object o) =
   S3Event <$> o .: "bucket"
-  <*> parseEventType
+  <*> o .: "event"
   <*> o .:? "rules" .!= []
-  where
-    -- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
-    parseEventType :: Parser Text
-    parseEventType =
-      o .: "event"
+
 
 parseS3Event invalid =
   typeMismatch "S3 Event" invalid
@@ -328,4 +326,45 @@ main =
           Right serverless ->
             do
               print serverless
-              putStrLn $ "The provided file '" ++ f ++ "' is valid"
+              let validations =
+                    and [ validateS3EventArn $ toS3Events serverless
+                        ]
+              when validations (putStrLn $ "The provided file '" ++ f ++ "' is valid")
+              unless validations (putStrLn $ "The provided file '" ++ f ++ "' is not valid")
+
+    toS3Events :: Serverless -> [Event]
+    toS3Events serverless =
+        concatMap (filterS3Events . functionEvents) $ getFunctions (functions serverless)
+      where
+        filterS3Events :: [Event] -> [Event]
+        filterS3Events =
+          filter isS3Event
+
+        isS3Event :: Event -> Bool
+        isS3Event (S3Event _ _ _) =
+          True
+        isS3Event _ =
+          False
+
+    -- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
+    validateS3EventArn :: [Event] -> Bool
+    validateS3EventArn [] =
+      True
+
+    validateS3EventArn s3Events =
+      and $ flip map s3Events (\s3Event ->
+                               case s3Event of
+                                 S3Event _ e _ ->
+                                   Maybe.isJust $ Regex.matchRegex s3ArnRegex (T.unpack e)
+
+                                 _ ->
+                                   False)
+      where
+        objCreatedRegex =
+          "ObjectCreated:(\\*|Put|Post|Copy|CompleteMultipartUpload)"
+
+        objRemovedRegex =
+          "ObjectRemoved:(\\*|Delete|DeleteMarkerCreated)"
+
+        s3ArnRegex =
+          Regex.mkRegex $ "s3:(" ++ objCreatedRegex ++ "|" ++ objRemovedRegex ++ "|ReducedRedundancyLostObject)"

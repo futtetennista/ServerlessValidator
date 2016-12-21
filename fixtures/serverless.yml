@@ -22,7 +22,7 @@ functions:
     events:
       - s3:
           bucket: test
-          event: foo
+          event: s3:ObjectRemoved:*
           rules:
             - prefix: foo/
             - suffix: .bar
