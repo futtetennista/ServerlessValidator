@@ -18,7 +18,6 @@ import qualified Data.HashMap.Strict as Map (toList)
 import qualified Data.Text as T (unpack, splitOn, concat, empty)
 import qualified Data.CaseInsensitive as CI (mk)
 import qualified System.Environment as S (getArgs)
-import qualified Data.Maybe as Maybe (isJust)
 import qualified Text.Regex as Regex (mkRegex, matchRegex)
 
 
@@ -59,7 +58,7 @@ instance FromJSON Runtime where
     typeMismatch "Runtime" invalid
 
 
-toRuntime :: Data.Text.Internal.Text -> Either String Runtime
+toRuntime :: Text -> Either String Runtime
 toRuntime rt =
   case rt of
     "nodejs" ->
@@ -165,7 +164,7 @@ data Event
   | ScheduleEvent
   | SnsEvent
   | StreamEvent
-  | EmptyEvent Text
+  | UnknownEvent Text
   deriving Show
 
 
@@ -219,7 +218,7 @@ instance FromJSON Event where
                 parseS3Event eventConfig
 
               _ ->
-                return $ EmptyEvent eventName
+                return $ UnknownEvent eventName
 
           _ ->
             typeMismatch "Event" value
@@ -360,7 +359,7 @@ main =
     -- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
     validateS3EventArn :: [Event] -> (Bool, [Text])
     validateS3EventArn s3Events =
-      case filter left (flip map s3Events validateS3EventArn') of
+      case filter isLeft (flip map s3Events validateS3EventArn') of
         [] ->
           (True, [])
 
@@ -384,7 +383,7 @@ main =
             _ ->
               Left "Not an S3 Event"
 
-        left res =
+        isLeft res =
           case res of
             Left _ ->
               True
