@@ -161,11 +161,49 @@ data Event
             , s3EventEvent :: Text
             , s3EventRules :: [S3EventRule]
             }
-  | ScheduleEvent
+  | ScheduleEvent { scheduleEventRate :: Text
+                  , scheduleEventEnabled :: Bool
+                  , scheduleEventInput :: ScheduleEventInput
+                  , scheduleEventInputPath :: Maybe Text
+                  , scheduleEventName :: Maybe Text
+                  , scheduleEventDescription :: Maybe Text
+                  }
   | SnsEvent
   | StreamEvent
   | UnknownEvent Text
   deriving Show
+
+
+data ScheduleEventInput
+  = SEI { key1 :: Text
+        , key2 :: Text
+        , stageParams :: ScheduleEventInputStageParams
+        }
+  | EmptySEI
+  deriving Show
+
+
+instance FromJSON ScheduleEventInput where
+  parseJSON (Object o) =
+    SEI <$> o .: "key1"
+    <*> o .: "key2"
+    <*> o .: "stageParams"
+
+  parseJSON invalid =
+    typeMismatch "Schedule Event Input" invalid
+
+
+data ScheduleEventInputStageParams =
+  SEISP { stage :: Text }
+  deriving Show
+
+
+instance FromJSON ScheduleEventInputStageParams where
+  parseJSON (String str) =
+    return $ SEISP { stage = str }
+
+  parseJSON invalid =
+    typeMismatch "Schedule Event Stage" invalid
 
 
 data HttpMethod
@@ -217,6 +255,9 @@ instance FromJSON Event where
               "s3" ->
                 parseS3Event eventConfig
 
+              "schedule" ->
+                parseScheduleEvent eventConfig
+
               _ ->
                 return $ UnknownEvent eventName
 
@@ -224,12 +265,24 @@ instance FromJSON Event where
             typeMismatch "Event" value
 
 
+parseScheduleEvent :: Value -> Parser Event
+parseScheduleEvent (Object o) =
+  ScheduleEvent <$> o .: "rate"
+  <*> o .: "enabled"
+  <*> o .:? "input" .!= EmptySEI
+  <*> o .:? "inputPath"
+  <*> o .:? "name"
+  <*> o .:? "description"
+
+parseScheduleEvent invalid =
+  typeMismatch "Schedule Event" invalid
+
+
 parseS3Event :: Value -> Parser Event
 parseS3Event (Object o) =
   S3Event <$> o .: "bucket"
   <*> o .: "event"
   <*> o .:? "rules" .!= []
-
 
 parseS3Event invalid =
   typeMismatch "S3 Event" invalid
