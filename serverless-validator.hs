@@ -15,14 +15,17 @@ import Data.Aeson.Types (Object, typeMismatch, withObject)
 import Data.Yaml (FromJSON, Value (String, Object), Parser, ParseException, (.:), (.:?), (.!=))
 import qualified Data.Yaml as YML (decodeFileEither, parseJSON)
 import qualified Data.HashMap.Strict as Map (toList)
-import qualified Data.Text as T (unpack, splitOn, concat, empty)
+import qualified Data.Text as T (unpack, splitOn, concat, empty, pack)
+import qualified Text.Read as TR (readMaybe)
 import qualified Data.CaseInsensitive as CI (mk)
 import qualified System.Environment as S (getArgs)
 import qualified Text.Regex as Regex (mkRegex, matchRegex)
+import qualified Data.Maybe as Maybe (fromJust, isJust)
 
 
 data Serverless
   = S { service :: String
+      , frameworkVersion :: FrameworkVersion
       , provider :: Provider
       , functions :: Functions
       }
@@ -32,11 +35,78 @@ data Serverless
 instance FromJSON Serverless where
   parseJSON (Object o) =
     S <$> o .: "service"
+    <*> o .:? "frameworkVersion" .!= frameworkVersionLatestSupported
     <*> o .: "provider"
     <*> o .: "functions"
 
   parseJSON invalid =
     typeMismatch "Serverless" invalid
+
+
+data FrameworkVersion =
+  FV { frameworkVersionMin :: SemVer
+     , frameworkVersionMax :: SemVer
+     }
+  deriving Show
+
+
+instance FromJSON FrameworkVersion where
+  parseJSON (String v) =
+    let
+      fVRegex =
+        Regex.mkRegex "^>=([0-9]+\\.[0-9]+\\.[0-9]+) <([0-9]+\\.[0-9]+\\.[0-9]+)$"
+    in
+      case Regex.matchRegex fVRegex (T.unpack v) of
+        Just [minVer, maxVer] ->
+          let
+            minSemVer =
+              toSemVer $ T.pack minVer
+
+            maxSemVer =
+              toSemVer $ T.pack maxVer
+          in
+            case all Maybe.isJust [minSemVer, maxSemVer] of
+              True ->
+                return $ FV { frameworkVersionMin = Maybe.fromJust minSemVer
+                            , frameworkVersionMax = Maybe.fromJust maxSemVer
+                            }
+
+              False ->
+                fail "Framework version must be a string of the form: >=x.x.x <x.x.x"
+
+        _ ->
+          fail "Framework version must be a string of the form: >=x.x.x <x.x.x"
+
+  parseJSON invalid =
+    typeMismatch "Framework version" invalid
+
+
+frameworkVersionLatestSupported :: FrameworkVersion
+frameworkVersionLatestSupported =
+  FV { frameworkVersionMin = Maybe.fromJust $ toSemVer "1.0.0"
+     , frameworkVersionMax = Maybe.fromJust $ toSemVer "2.0.0"
+     }
+
+
+data SemVer =
+  SemVer { svMajor :: Int
+         , svMinor :: Int
+         , svPatch :: Int
+         }
+  deriving Show
+
+
+toSemVer :: Text -> Maybe SemVer
+toSemVer t =
+  case map (TR.readMaybe . T.unpack) $ T.splitOn "." t of
+    [Just major, Just minor, Just patch] ->
+      Just $ SemVer { svMajor = major
+                    , svMinor = minor
+                    , svPatch = patch
+                    }
+
+    _ ->
+      Nothing
 
 
 data Runtime

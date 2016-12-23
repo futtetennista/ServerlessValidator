@@ -1,5 +1,7 @@
 service: MyService
 
+frameworkVersion: ">=1.0.0 <2.0.0"
+
 provider:
   name: foobar
   runtime: nodejs
