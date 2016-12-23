@@ -83,8 +83,8 @@ instance FromJSON FrameworkVersion where
 
 frameworkVersionLatestSupported :: FrameworkVersion
 frameworkVersionLatestSupported =
-  FV { frameworkVersionMin = Maybe.fromJust $ toSemVer "1.0.0"
-     , frameworkVersionMax = Maybe.fromJust $ toSemVer "2.0.0"
+  FV { frameworkVersionMin = frameworkVersionMinSupported
+     , frameworkVersionMax = frameworkVersionMaxSupported
      }
 
 
@@ -93,7 +93,42 @@ data SemVer =
          , svMinor :: Int
          , svPatch :: Int
          }
-  deriving Show
+  deriving Eq
+
+
+instance Show SemVer where
+  show sv =
+    show (svMajor sv) ++ "." ++ show (svMinor sv) ++ "." ++ show (svPatch sv)
+
+instance Ord SemVer where
+  compare a b =
+    case compare (svMajor a) (svMajor b) of
+      GT ->
+       GT
+
+      LT ->
+       LT
+
+      EQ ->
+       case compare (svMinor a) (svMinor b) of
+         GT ->
+           GT
+
+         LT ->
+           LT
+
+         EQ ->
+           compare (svPatch a) (svPatch b)
+
+
+frameworkVersionMinSupported :: SemVer
+frameworkVersionMinSupported =
+  Maybe.fromJust $ toSemVer "1.0.0"
+
+
+frameworkVersionMaxSupported :: SemVer
+frameworkVersionMaxSupported =
+  Maybe.fromJust $ toSemVer "2.0.0"
 
 
 toSemVer :: Text -> Maybe SemVer
@@ -449,21 +484,62 @@ main =
             do
               print serverless
               let
+                frameworkVersionValidationRes =
+                  validateFrameworkVersion $ frameworkVersion serverless
+
                 s3EventsValidationRes =
                   validateS3EventArn $ toS3Events serverless
 
-                validations =
-                    all fst [ s3EventsValidationRes ]
+                validationRess =
+                    all fst [ frameworkVersionValidationRes
+                            , s3EventsValidationRes
+                            ]
 
-              when validations (putStrLn $ "The provided file '" ++ f ++ "' is valid")
-              unless validations (do
-                                     putStrLn $ "Validation of file '" ++ f ++ "' failed:"
-                                     printErrors (snd s3EventsValidationRes)
-                                 )
+              when validationRess (putStrLn $ "The provided file '" ++ f ++ "' is valid")
+              unless validationRess (do
+                                        putStrLn $ "Validation of file '" ++ f ++ "' failed:"
+                                        printErrors $ concatMap snd [ frameworkVersionValidationRes
+                                                                    , s3EventsValidationRes
+                                                                    ]
+                                    )
 
     printErrors :: [Text] -> IO ()
     printErrors errs =
       forM_ errs (\msg -> putStrLn $ "- " ++ T.unpack msg)
+
+    validateFrameworkVersion :: FrameworkVersion -> (Bool, [Text])
+    validateFrameworkVersion fv =
+      let
+        minRes =
+          compare frameworkVersionMinSupported (frameworkVersionMin fv)
+
+        maxRes =
+          compare frameworkVersionMaxSupported (frameworkVersionMax fv)
+      in
+        case minRes of
+          LT ->
+            (False, [ T.concat [ "Minimum version '"
+                               , T.pack (show $ frameworkVersionMin fv)
+                               , "' is not supported, '"
+                               , T.pack $ show frameworkVersionMinSupported
+                               , "' is the minimum supported version (inclusive)"
+                               ]
+                    ])
+          _ ->
+            case maxRes of
+              GT ->
+                (False, [ T.concat [ "Maximum version '"
+                                   , T.pack (show $ frameworkVersionMax fv)
+                                   , "' is not supported, '"
+                                   , T.pack $ show frameworkVersionMaxSupported
+                                   , "' the maximum supported version (exclusive)"
+                                   ]
+                        ])
+
+              _ ->
+                (True, [])
+
+
 
     toS3Events :: Serverless -> [Event]
     toS3Events serverless =
