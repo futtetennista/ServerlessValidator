@@ -8,15 +8,18 @@
 
 -- Serverless.yml reference: https://serverless.com/framework/docs/providers/aws/guide/serverless.yml/
 
-import Data.Text.Internal (Text)
+import Data.Monoid ((<>))
+import Data.Text (Text)
 import Data.Traversable (for)
 import Control.Monad (forM_, when, unless)
 import Data.Aeson.Types (Object, typeMismatch, withObject)
 import Data.Yaml (FromJSON, Value (String, Object), Parser, ParseException, (.:), (.:?), (.!=))
 import qualified Data.Yaml as YML (decodeFileEither, parseJSON)
 import qualified Data.HashMap.Strict as Map (toList)
-import qualified Data.Text as T (unpack, splitOn, concat, empty, pack)
-import qualified Text.Read as TR (readMaybe)
+import qualified Data.Text as T (unpack, splitOn, pack)
+import qualified Data.Text.Lazy.Read as TLR (decimal)
+import qualified Data.Text.Lazy as TL (Text, fromStrict, empty)
+import qualified Data.Text.Lazy.Builder as TLB (toLazyText, fromText, fromString)
 import qualified Data.CaseInsensitive as CI (mk)
 import qualified System.Environment as S (getArgs)
 import qualified Text.Regex as Regex (mkRegex, matchRegex)
@@ -133,8 +136,8 @@ frameworkVersionMaxSupported =
 
 toSemVer :: Text -> Maybe SemVer
 toSemVer t =
-  case map (TR.readMaybe . T.unpack) $ T.splitOn "." t of
-    [Just major, Just minor, Just patch] ->
+  case map (TLR.decimal . TL.fromStrict) $ T.splitOn "." t of
+    [Right (major, _), Right (minor, _), Right (patch, _)] ->
       Just $ SemVer { svMajor = major
                     , svMinor = minor
                     , svPatch = patch
@@ -490,24 +493,24 @@ main =
                 s3EventsValidationRes =
                   validateS3EventArn $ toS3Events serverless
 
-                validationRess =
+                validationsSuccess =
                     all fst [ frameworkVersionValidationRes
                             , s3EventsValidationRes
                             ]
 
-              when validationRess (putStrLn $ "The provided file '" ++ f ++ "' is valid")
-              unless validationRess (do
-                                        putStrLn $ "Validation of file '" ++ f ++ "' failed:"
-                                        printErrors $ concatMap snd [ frameworkVersionValidationRes
-                                                                    , s3EventsValidationRes
-                                                                    ]
-                                    )
+              when validationsSuccess (putStrLn $ "The provided file '" ++ f ++ "' is valid")
+              unless validationsSuccess $
+                do
+                  putStrLn $ "Validation of file '" ++ f ++ "' failed:"
+                  printErrors $ concatMap snd [ frameworkVersionValidationRes
+                                              , s3EventsValidationRes
+                                              ]
 
-    printErrors :: [Text] -> IO ()
+    printErrors :: [TL.Text] -> IO ()
     printErrors errs =
-      forM_ errs (\msg -> putStrLn $ "- " ++ T.unpack msg)
+      forM_ errs (\msg -> print $ "- " <> msg)
 
-    validateFrameworkVersion :: FrameworkVersion -> (Bool, [Text])
+    validateFrameworkVersion :: FrameworkVersion -> (Bool, [TL.Text])
     validateFrameworkVersion fv =
       let
         minRes =
@@ -518,23 +521,23 @@ main =
       in
         case minRes of
           LT ->
-            (False, [ T.concat [ "Minimum version '"
-                               , T.pack (show $ frameworkVersionMin fv)
-                               , "' is not supported, '"
-                               , T.pack $ show frameworkVersionMinSupported
-                               , "' is the minimum supported version (inclusive)"
-                               ]
-                    ])
+            (False, [ TLB.toLazyText $ "Minimum version '"
+                      <> (TLB.fromString $ show (frameworkVersionMin fv))
+                      <> "' is not supported, '"
+                      <> (TLB.fromString $ show frameworkVersionMinSupported)
+                      <> "' is the minimum supported version (inclusive)"
+                    ]
+            )
           _ ->
             case maxRes of
               GT ->
-                (False, [ T.concat [ "Maximum version '"
-                                   , T.pack (show $ frameworkVersionMax fv)
-                                   , "' is not supported, '"
-                                   , T.pack $ show frameworkVersionMaxSupported
-                                   , "' the maximum supported version (exclusive)"
-                                   ]
-                        ])
+                (False, [ TLB.toLazyText $ "Maximum version '"
+                          <> (TLB.fromString $ show $ frameworkVersionMax fv)
+                          <> "' is not supported, '"
+                          <> (TLB.fromString $ show frameworkVersionMaxSupported)
+                          <> "' the maximum supported version (exclusive)"
+                        ]
+                )
 
               _ ->
                 (True, [])
@@ -556,14 +559,14 @@ main =
           False
 
     -- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
-    validateS3EventArn :: [Event] -> (Bool, [Text])
+    validateS3EventArn :: [Event] -> (Bool, [TL.Text])
     validateS3EventArn s3Events =
       case filter isLeft (flip map s3Events validateS3EventArn') of
         [] ->
           (True, [])
 
         xs ->
-          (False, flip map xs $ either id (\_ -> T.empty))
+          (False, flip map xs $ either id (\_ -> TL.empty))
 
       where
         validateS3EventArn' s3Event =
@@ -571,10 +574,7 @@ main =
             S3Event _ e _ ->
               case Regex.matchRegex s3ArnRegex (T.unpack e) of
                 Nothing ->
-                  Left $ T.concat [ "'"
-                                  , e
-                                  ,"' is not a valid s3 arn"
-                                  ]
+                  Left $ TLB.toLazyText ("'" <> TLB.fromText e <> "' is not a valid s3 arn")
 
                 Just _ ->
                   Right ()
