@@ -7,6 +7,7 @@ provider:
   runtime: nodejs
 
 functions:
+# HTTP Events
   foo1:
     handler: handler.foo1
     events:
@@ -18,7 +19,7 @@ functions:
       - http:
           path: postit
           method: POST
-
+# S3 Events
   foo3:
     handler: handler.foo2
     events:
@@ -28,3 +29,20 @@ functions:
           rules:
             - prefix: foo/
             - suffix: .bar
+# Sns Events
+  foo4:
+    handler: handler.foo1
+    events:
+      - sns: foobar
+
+  foo5:
+    handler: handler.foo1
+    events:
+      - sns: arn:aws:sns:*:123456789012:my_corporate_topic
+
+  foo6:
+    handler: handler.foo1
+    events:
+      - sns:
+          topicName: foobar
+          displayName: Data aggregation pipeline

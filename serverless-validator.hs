@@ -106,22 +106,16 @@ instance Show SemVer where
 instance Ord SemVer where
   compare a b =
     case compare (svMajor a) (svMajor b) of
-      GT ->
-       GT
-
-      LT ->
-       LT
-
       EQ ->
        case compare (svMinor a) (svMinor b) of
-         GT ->
-           GT
-
-         LT ->
-           LT
-
          EQ ->
            compare (svPatch a) (svPatch b)
+
+         x' ->
+           x'
+
+      x ->
+        x
 
 
 frameworkVersionMinSupported :: SemVer
@@ -220,8 +214,8 @@ instance FromJSON Functions where
 
     where
       parseFunctions :: Object -> Parser Functions
-      parseFunctions obj =
-        fmap FS . for (Map.toList obj) $ \(n, v) -> parseFunction n v
+      parseFunctions fObj =
+        fmap FS . for (Map.toList fObj) $ \(n, b) -> parseFunction n b
 
 
 data Function =
@@ -276,7 +270,10 @@ data Event
                   , scheduleEventName :: Maybe Text
                   , scheduleEventDescription :: Maybe Text
                   }
-  | SnsEvent
+  | SnsEvent { snsEventTopicName :: Maybe Text
+             , snsEventTopicArn :: Maybe Text
+             , snsEventDisplayName :: Maybe Text
+             }
   | StreamEvent
   | UnknownEvent Text
   deriving Show
@@ -366,11 +363,55 @@ instance FromJSON Event where
               "schedule" ->
                 parseScheduleEvent eventConfig
 
+              "sns" ->
+                parseSnsEvent eventConfig
+
               _ ->
                 return $ UnknownEvent eventName
 
           _ ->
             typeMismatch "Event" value
+
+
+data AwsService
+  = Sns
+  deriving Show
+
+
+isArn :: AwsService -> Text -> Bool
+isArn awsSer t =
+  Maybe.isJust $ Regex.matchRegex arnRegex (T.unpack t)
+  where
+    arnRegex =
+      case awsSer of
+        -- http://docs.aws.amazon.com/general/latest/gr/aws-arns-and-namespaces.html#arn-syntax-sns
+        Sns ->
+          Regex.mkRegex $ "arn:aws:sns:(\\*|[a-z]{2}-[a-z]+-[0-9]+):[0-9]{12}:.+"
+
+
+parseSnsEvent :: Value -> Parser Event
+parseSnsEvent (String str) =
+  case isArn Sns str of
+    True ->
+      return SnsEvent { snsEventTopicName = Nothing
+                      , snsEventTopicArn = Just str
+                      , snsEventDisplayName = Nothing
+                      }
+
+    False ->
+      return SnsEvent { snsEventTopicName = Just str
+                      , snsEventTopicArn = Nothing
+                      , snsEventDisplayName = Nothing
+                      }
+
+
+parseSnsEvent (Object o) =
+  SnsEvent <$> o .: "topicName"
+  <*> return Nothing
+  <*> o .: "displayName"
+
+parseSnsEvent invalid =
+  typeMismatch "Sns Event" invalid
 
 
 parseScheduleEvent :: Value -> Parser Event
@@ -470,7 +511,7 @@ main =
                ]
     case args of
       [] ->
-        putStrLn "Usage: ./serverless-validator.hs /path/to/serverless.yml"
+        putStrLn "Usage: ./serverless-validator.hs /path/to/serverless.yml [/path/to/another/serverless.yml]"
 
       xs ->
         forM_ xs validate
