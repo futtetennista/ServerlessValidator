@@ -4,16 +4,15 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DeriveGeneric #-}
 
 -- Serverless.yml reference: https://serverless.com/framework/docs/providers/aws/guide/serverless.yml/
 
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import Data.Traversable (for)
-import Control.Monad (forM_, when, unless)
 import Data.Aeson.Types (Object, typeMismatch, withObject)
 import Data.Yaml (FromJSON, Value (String, Object), Parser, ParseException, (.:), (.:?), (.!=))
+import Control.Monad (forM_)
 import qualified Data.Yaml as YML (decodeFileEither, parseJSON)
 import qualified Data.HashMap.Strict as Map (toList)
 import qualified Data.Text as T (unpack, splitOn, pack)
@@ -389,15 +388,6 @@ data AwsService
   | Kinesis
   deriving Show
 
-
-checkArn :: AwsService -> Text -> Maybe Text
-checkArn awsSer arn =
-  case validArn awsSer arn of
-    True ->
-      Just arn
-
-    False ->
-      Nothing
 
 validArn :: AwsService -> Text -> Bool
 validArn awsSer t =
