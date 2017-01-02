@@ -549,64 +549,40 @@ instance FromJSON HttpMethod where
     typeMismatch "HttpMethod" invalid
 
 
-decode :: String -> IO (Either ParseException Serverless)
-decode serverlessPath =
-  YML.decodeFileEither serverlessPath
+parse :: FileName -> IO (Either ParseException Serverless)
+parse f =
+  YML.decodeFileEither f
 
 
-main :: IO ()
-main =
-  do
-    args <- S.getArgs
-    let args = [ "fixtures/serverless.yml"
-               , "fixtures/serverless-bogus.yml"
-               ]
-    case args of
-      [] ->
-        putStrLn "Usage: ./serverless-validator.hs /path/to/serverless.yml [/path/to/another/serverless.yml]"
+validate :: Serverless -> Either [TL.Text] ()
+validate config =
+  let
+    frameworkVersionValidationRes =
+      validateFrameworkVersion $ frameworkVersion config
 
-      xs ->
-        forM_ xs validate
+    s3EventsValidationRes =
+      validateS3EventArn $ toS3Events config
+
+    streamEventsValidationRes =
+      validateStreamEventArn $ toStreamEvents config
+
+    valid =
+      all fst [ frameworkVersionValidationRes
+              , s3EventsValidationRes
+              , streamEventsValidationRes
+              ]
+  in
+    case valid of
+      True ->
+        Right ()
+
+      False ->
+        Left $ concatMap snd [ frameworkVersionValidationRes
+                             , s3EventsValidationRes
+                             , streamEventsValidationRes
+                             ]
 
   where
-    validate f =
-      do
-        res <- decode f
-        case res of
-          Left msg ->
-            print msg
-
-          Right serverless ->
-            do
-              print serverless
-              let
-                frameworkVersionValidationRes =
-                  validateFrameworkVersion $ frameworkVersion serverless
-
-                s3EventsValidationRes =
-                  validateS3EventArn $ toS3Events serverless
-
-                streamEventsValidationRes =
-                  validateStreamEventArn $ toStreamEvents serverless
-
-                validationsSuccess =
-                    all fst [ frameworkVersionValidationRes
-                            , s3EventsValidationRes
-                            , streamEventsValidationRes
-                            ]
-
-              when validationsSuccess (putStrLn $ "The provided file '" ++ f ++ "' is valid")
-              unless validationsSuccess $
-                do
-                  putStrLn $ "Validation of file '" ++ f ++ "' failed:"
-                  printErrors $ concatMap snd [ frameworkVersionValidationRes
-                                              , s3EventsValidationRes
-                                              ]
-
-    printErrors :: [TL.Text] -> IO ()
-    printErrors errs =
-      forM_ errs (\msg -> print $ "- " <> msg)
-
     validateFrameworkVersion :: FrameworkVersion -> (Bool, [TL.Text])
     validateFrameworkVersion fv =
       let
@@ -625,6 +601,7 @@ main =
                       <> "' is the minimum supported version (inclusive)"
                     ]
             )
+
           _ ->
             case maxRes of
               GT ->
@@ -740,10 +717,54 @@ main =
         s3EventArnRegex =
           Regex.mkRegex $ "s3:(" ++ objCreatedRegex ++ "|" ++ objRemovedRegex ++ "|ReducedRedundancyLostObject)"
 
-isLeft res =
-  case res of
-    Left _ ->
-      True
 
-    Right _ ->
-      False
+    isLeft :: Either a b -> Bool
+    isLeft res =
+      case res of
+        Left _ ->
+          True
+
+        Right _ ->
+          False
+
+
+type FileName = String
+
+
+main :: IO ()
+main =
+  do
+    args <- S.getArgs
+    let args = [ "fixtures/serverless.yml"
+               , "fixtures/serverless-bogus.yml"
+               ]
+    case args of
+      [] ->
+        putStrLn "Usage: ./serverless-validator.hs /path/to/serverless.yml [/path/to/another/serverless.yml]"
+
+      xs ->
+        forM_ xs check
+  where
+    check :: FileName -> IO ()
+    check f =
+      do
+        res <- parse f
+        case res of
+          Left msg ->
+            print msg
+
+          Right serverless ->
+            do
+              print serverless
+              case validate serverless of
+                Right _ ->
+                  putStrLn $ "The provided file '" ++ f ++ "' is valid"
+
+                Left errs ->
+                  do
+                    putStrLn $ "Validation of file '" ++ f ++ "' failed:"
+                    printErrors errs
+
+    printErrors :: [TL.Text] -> IO ()
+    printErrors errs =
+      forM_ errs (\msg -> print $ "- " <> msg)
