@@ -21,7 +21,7 @@ functions:
           method: POST
 # S3 Events
   foo3:
-    handler: handler.foo2
+    handler: handler.foo3
     events:
       - s3:
           bucket: test
@@ -31,18 +31,32 @@ functions:
             - suffix: .bar
 # Sns Events
   foo4:
-    handler: handler.foo1
+    handler: handler.foo4
     events:
       - sns: foobar
 
   foo5:
-    handler: handler.foo1
+    handler: handler.foo5
     events:
       - sns: arn:aws:sns:*:123456789012:my_corporate_topic
 
   foo6:
-    handler: handler.foo1
+    handler: handler.foo6
     events:
       - sns:
           topicName: foobar
           displayName: Data aggregation pipeline
+# Stream Events
+  foo7:
+    handler: handler.foo7
+    events:
+      - stream:
+          arn: arn:aws:kinesis:us-east-1:123456789012:stream/example-stream-name
+          batchSize: 100
+          startingPosition: LATEST
+          enabled: false
+
+  foo8:
+    handler: handler.foo8
+    events:
+      - stream: arn:aws:dynamodb:us-east-1:123456789012:table/books_table

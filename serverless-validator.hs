@@ -56,6 +56,7 @@ data FrameworkVersion =
 instance FromJSON FrameworkVersion where
   parseJSON (String v) =
     let
+      -- TODO[1]: is this re-compiled each time? Shall it be moved this to the outer scope?!
       fVRegex =
         Regex.mkRegex "^>=([0-9]+\\.[0-9]+\\.[0-9]+) <([0-9]+\\.[0-9]+\\.[0-9]+)$"
     in
@@ -274,7 +275,13 @@ data Event
              , snsEventTopicArn :: Maybe Text
              , snsEventDisplayName :: Maybe Text
              }
-  | StreamEvent
+  | DynamoDBEvent { dynamoDBArn :: Text
+                  }
+  | KinesisEvent { kinesisArn :: Text
+                 , kinesisBatchSize :: Int
+                 , kinesisStartingPosition :: String
+                 , kinesisEnabled :: Bool
+                 }
   | UnknownEvent Text
   deriving Show
 
@@ -366,6 +373,9 @@ instance FromJSON Event where
               "sns" ->
                 parseSnsEvent eventConfig
 
+              "stream" ->
+                parseStreamEvent eventConfig
+
               _ ->
                 return $ UnknownEvent eventName
 
@@ -375,23 +385,65 @@ instance FromJSON Event where
 
 data AwsService
   = Sns
+  | DynamoDB
+  | Kinesis
   deriving Show
 
 
-isArn :: AwsService -> Text -> Bool
-isArn awsSer t =
+checkArn :: AwsService -> Text -> Maybe Text
+checkArn awsSer arn =
+  case validArn awsSer arn of
+    True ->
+      Just arn
+
+    False ->
+      Nothing
+
+validArn :: AwsService -> Text -> Bool
+validArn awsSer t =
   Maybe.isJust $ Regex.matchRegex arnRegex (T.unpack t)
   where
     arnRegex =
-      case awsSer of
-        -- http://docs.aws.amazon.com/general/latest/gr/aws-arns-and-namespaces.html#arn-syntax-sns
-        Sns ->
-          Regex.mkRegex $ "arn:aws:sns:(\\*|[a-z]{2}-[a-z]+-[0-9]+):[0-9]{12}:.+"
+      let
+        -- see TODO[1]
+        snsRegex =
+          Regex.mkRegex "arn:aws:sns:(\\*|[a-z]{2}-[a-z]+-[0-9]+):[0-9]{12}:.+"
+
+        dynamoDBRegex =
+          Regex.mkRegex "arn:aws:dynamodb:(\\*|[a-z]{2}-[a-z]+-[0-9]+):[0-9]{12}:table/.+"
+
+        kinesisRegex =
+          Regex.mkRegex "arn:aws:kinesis:(\\*|[a-z]{2}-[a-z]+-[0-9]+):[0-9]{12}:stream/.+"
+      in
+        case awsSer of
+          -- http://docs.aws.amazon.com/general/latest/gr/aws-arns-and-namespaces.html#arn-syntax-sns
+          Sns ->
+            snsRegex
+
+          DynamoDB ->
+            dynamoDBRegex
+
+          Kinesis ->
+            kinesisRegex
+
+
+parseStreamEvent :: Value -> Parser Event
+parseStreamEvent (String str) =
+  return DynamoDBEvent { dynamoDBArn = str }
+
+parseStreamEvent (Object o) =
+  KinesisEvent <$> o .: "arn"
+  <*> o .: "batchSize"
+  <*> o .: "startingPosition"
+  <*> o .: "enabled"
+
+parseStreamEvent invalid =
+  typeMismatch "Stream event" invalid
 
 
 parseSnsEvent :: Value -> Parser Event
 parseSnsEvent (String str) =
-  case isArn Sns str of
+  case validArn Sns str of
     True ->
       return SnsEvent { snsEventTopicName = Nothing
                       , snsEventTopicArn = Just str
@@ -534,9 +586,13 @@ main =
                 s3EventsValidationRes =
                   validateS3EventArn $ toS3Events serverless
 
+                streamEventsValidationRes =
+                  validateStreamEventArn $ toStreamEvents serverless
+
                 validationsSuccess =
                     all fst [ frameworkVersionValidationRes
                             , s3EventsValidationRes
+                            , streamEventsValidationRes
                             ]
 
               when validationsSuccess (putStrLn $ "The provided file '" ++ f ++ "' is valid")
@@ -584,6 +640,56 @@ main =
                 (True, [])
 
 
+    toStreamEvents :: Serverless -> [Event]
+    toStreamEvents serverless =
+      concatMap (filterStreamEvents . functionEvents) $ getFunctions (functions serverless)
+      where
+        filterStreamEvents :: [Event] -> [Event]
+        filterStreamEvents =
+          filter isStreamEvent
+
+        isStreamEvent :: Event -> Bool
+        isStreamEvent (DynamoDBEvent _) =
+          True
+
+        isStreamEvent (KinesisEvent _ _ _ _) =
+          True
+
+        isStreamEvent _ =
+          False
+
+
+    validateStreamEventArn :: [Event] -> (Bool, [TL.Text])
+    validateStreamEventArn streamEvents =
+      case filter isLeft (flip map streamEvents validateStreamEventArn') of
+        [] ->
+          (True, [])
+
+        xs ->
+          (False, flip map xs $ either id (\_ -> TL.empty))
+
+      where
+        validateStreamEventArn' event =
+          case event of
+            DynamoDBEvent arn ->
+              case validArn DynamoDB arn of
+                True ->
+                  Right ()
+
+                False ->
+                 Left $ TLB.toLazyText ("'" <> TLB.fromText arn  <> "' is not a valid dynamoDB arn")
+
+            KinesisEvent arn _ _ _ ->
+              case validArn Kinesis arn of
+                True ->
+                  Right ()
+
+                False ->
+                  Left $ TLB.toLazyText ("'" <> TLB.fromText arn <> "' is not a valid kinesis arn")
+
+            _ ->
+              Left "Not a stream event"
+
 
     toS3Events :: Serverless -> [Event]
     toS3Events serverless =
@@ -596,6 +702,7 @@ main =
         isS3Event :: Event -> Bool
         isS3Event (S3Event _ _ _) =
           True
+
         isS3Event _ =
           False
 
@@ -613,23 +720,15 @@ main =
         validateS3EventArn' s3Event =
           case s3Event of
             S3Event _ e _ ->
-              case Regex.matchRegex s3ArnRegex (T.unpack e) of
+              case Regex.matchRegex s3EventArnRegex (T.unpack e) of
                 Nothing ->
-                  Left $ TLB.toLazyText ("'" <> TLB.fromText e <> "' is not a valid s3 arn")
+                  Left $ TLB.toLazyText ("'" <> TLB.fromText e <> "' is not a valid s3 event arn")
 
                 Just _ ->
                   Right ()
 
             _ ->
-              Left "Not an S3 Event"
-
-        isLeft res =
-          case res of
-            Left _ ->
-              True
-
-            Right _ ->
-              False
+              Left "Not a S3 Event"
 
         objCreatedRegex =
           "ObjectCreated:(\\*|Put|Post|Copy|CompleteMultipartUpload)"
@@ -637,5 +736,14 @@ main =
         objRemovedRegex =
           "ObjectRemoved:(\\*|Delete|DeleteMarkerCreated)"
 
-        s3ArnRegex =
+        -- see TODO[1]
+        s3EventArnRegex =
           Regex.mkRegex $ "s3:(" ++ objCreatedRegex ++ "|" ++ objRemovedRegex ++ "|ReducedRedundancyLostObject)"
+
+isLeft res =
+  case res of
+    Left _ ->
+      True
+
+    Right _ ->
+      False
