@@ -142,8 +142,9 @@ toSemVer t =
 
 
 data Runtime
-  = NodeJs4_3
-  | NodeJs
+  = NodeJs
+  | Python
+  | Java
   deriving Show
 
 
@@ -153,24 +154,26 @@ instance FromJSON Runtime where
       Right rt ->
         return rt
 
-      Left e ->
-        fail e
+      Left err ->
+        fail err
+    where
+      toRuntime :: Text -> Either String Runtime
+      toRuntime rt =
+        case rt of
+          "nodejs4.3" ->
+            Right NodeJs
+
+          "java8" ->
+            Right Java
+
+          "python2.7" ->
+            Right Python
+
+          _ ->
+            Left $ "Unsupported runtime '" ++ T.unpack rt ++ "'"
 
   parseJSON invalid =
     typeMismatch "Runtime" invalid
-
-
-toRuntime :: Text -> Either String Runtime
-toRuntime rt =
-  case rt of
-    "nodejs" ->
-      Right NodeJs
-
-    "nodejs4.3" ->
-      Right NodeJs4_3
-
-    _ ->
-      Left $ "Unsupported runtime '" ++ T.unpack rt ++ "'"
 
 
 type Environment = (String, String)

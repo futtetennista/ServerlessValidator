@@ -4,7 +4,7 @@ frameworkVersion: ">=1.0.0 <2.0.0"
 
 provider:
   name: foobar
-  runtime: nodejs
+  runtime: nodejs4.3
 
 functions:
 # HTTP Events
