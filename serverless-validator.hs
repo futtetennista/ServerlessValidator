@@ -4,15 +4,19 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 -- Serverless.yml reference: https://serverless.com/framework/docs/providers/aws/guide/serverless.yml/
 
+import Prelude (id)
+import GHC.Show (show)
+import Protolude hiding ((<>), Prefix, show)
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import Data.Traversable (for)
 import Data.Aeson.Types (Object, typeMismatch, withObject)
 import Data.Yaml (FromJSON, Value (String, Object), Parser, ParseException, (.:), (.:?), (.!=))
-import Control.Monad (forM_)
+import Control.Monad (forM_, fail)
 import qualified Data.Yaml as YML (decodeFileEither, parseJSON)
 import qualified Data.HashMap.Strict as Map (toList)
 import qualified Data.Text as T (unpack, splitOn, pack)
@@ -26,7 +30,7 @@ import qualified Data.Maybe as Maybe (fromJust, isJust)
 
 
 data Serverless
-  = S { service :: String
+  = S { service :: Text
       , frameworkVersion :: FrameworkVersion
       , provider :: Provider
       , functions :: Functions
@@ -155,9 +159,9 @@ instance FromJSON Runtime where
         return rt
 
       Left err ->
-        fail err
+        fail $ T.unpack err
     where
-      toRuntime :: Text -> Either String Runtime
+      toRuntime :: Text -> Either Text Runtime
       toRuntime rt =
         case rt of
           "nodejs4.3" ->
@@ -170,13 +174,13 @@ instance FromJSON Runtime where
             Right Python
 
           _ ->
-            Left $ "Unsupported runtime '" ++ T.unpack rt ++ "'"
+            Left $ "Unsupported runtime '" <> rt <> "'"
 
   parseJSON invalid =
     typeMismatch "Runtime" invalid
 
 
-type Environment = (String, String)
+type Environment = (Text, Text)
 
 
 emptyEnvironment :: [Environment]
@@ -185,7 +189,7 @@ emptyEnvironment =
 
 
 data Provider
-  = P { name :: String
+  = P { name :: Text
       , globalRuntime :: Runtime
       , globalMemorySize :: Maybe Int
       , globalTimeout :: Maybe Int
@@ -281,7 +285,7 @@ data Event
                   }
   | KinesisEvent { kinesisArn :: Text
                  , kinesisBatchSize :: Int
-                 , kinesisStartingPosition :: String
+                 , kinesisStartingPosition :: Text
                  , kinesisEnabled :: Bool
                  }
   | UnknownEvent Text
@@ -495,7 +499,7 @@ parseHttpEvent (String config) =
                            }
 
         Left err ->
-          fail $ "Unknown HTTP method: " ++ err
+          fail $ T.unpack ("Unknown HTTP method: " <> err)
 
     _ ->
       fail "HTTP string must contain only a HTTP method and a path, i.e. 'http: GET foo'"
@@ -510,7 +514,7 @@ parseHttpEvent invalid =
   typeMismatch "HTTP Event" invalid
 
 
-toHttpMethod :: Text -> Either String HttpMethod
+toHttpMethod :: Text -> Either Text HttpMethod
 toHttpMethod httpMethodStr =
   case CI.mk httpMethodStr of
     "get" ->
@@ -526,7 +530,7 @@ toHttpMethod httpMethodStr =
       Right Delete
 
     str ->
-      Left $ show str
+      Left $ T.pack (show str)
 
 
 instance FromJSON HttpMethod where
@@ -536,7 +540,7 @@ instance FromJSON HttpMethod where
         return m
 
       Left err ->
-        fail $ "Unknown HTTP method: " ++ err
+        fail $ T.unpack("Unknown HTTP method: " <> err)
 
   parseJSON invalid =
     typeMismatch "HttpMethod" invalid
@@ -714,50 +718,40 @@ validate config =
           Regex.mkRegex $ "s3:(" ++ objCreatedRegex ++ "|" ++ objRemovedRegex ++ "|ReducedRedundancyLostObject)"
 
 
-    isLeft :: Either a b -> Bool
-    isLeft res =
-      case res of
-        Left _ ->
-          True
-
-        Right _ ->
-          False
-
-
 main :: IO ()
 main =
   do
     args <- S.getArgs
-    let args = [ "fixtures/serverless.yml"
-               , "fixtures/serverless-bogus.yml"
-               ]
+    -- let args = [ "fixtures/serverless.yml"
+    --            , "fixtures/serverless-bogus.yml"
+    --            ]
     case args of
       [] ->
-        putStrLn "Usage: ./serverless-validator.hs /path/to/serverless.yml [/path/to/another/serverless.yml]"
+        print $ T.pack "Usage: ./serverless-validator.hs /path/to/serverless.yml [/path/to/another/serverless.yml]"
 
       xs ->
-        forM_ xs check
+        forM_ xs checkFile
   where
-    check :: FilePath -> IO ()
-    check f =
+    checkFile :: FilePath -> IO ()
+    checkFile f =
       do
         res <- parse f
         case res of
-          Left msg ->
-            print msg
+          Left errs ->
+            print errs
 
           Right serverless ->
             do
               print serverless
               case validate serverless of
                 Right _ ->
-                  putStrLn $ "The provided file '" ++ f ++ "' is valid"
+                  print $ "The provided file '" <> f <> "' is valid"
 
                 Left errs ->
                   do
-                    putStrLn $ "Validation of file '" ++ f ++ "' failed:"
+                    print $ "Validation of file '" <> f <> "' failed:"
                     printErrors errs
 
-    printErrors :: [TL.Text] -> IO ()
+    printErrors :: ErrorMessages -> IO ()
     printErrors errs =
-      forM_ errs (\msg -> print $ "- " <> msg)
+      forM_ errs (\err -> print $ "- " <> err)
