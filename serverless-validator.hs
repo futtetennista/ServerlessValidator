@@ -542,12 +542,15 @@ instance FromJSON HttpMethod where
     typeMismatch "HttpMethod" invalid
 
 
-parse :: FileName -> IO (Either ParseException Serverless)
+parse :: FilePath -> IO (Either ParseException Serverless)
 parse f =
   YML.decodeFileEither f
 
 
-validate :: Serverless -> Either [TL.Text] ()
+type ErrorMessages =
+  [TL.Text]
+
+validate :: Serverless -> Either ErrorMessages ()
 validate config =
   let
     frameworkVersionValidationRes =
@@ -560,23 +563,23 @@ validate config =
       validateStreamEventArn $ toStreamEvents config
 
     valid =
-      all fst [ frameworkVersionValidationRes
-              , s3EventsValidationRes
-              , streamEventsValidationRes
-              ]
+      all null [ frameworkVersionValidationRes
+               , s3EventsValidationRes
+               , streamEventsValidationRes
+               ]
   in
     case valid of
       True ->
         Right ()
 
       False ->
-        Left $ concatMap snd [ frameworkVersionValidationRes
-                             , s3EventsValidationRes
-                             , streamEventsValidationRes
-                             ]
+        Left $ concat [ frameworkVersionValidationRes
+                      , s3EventsValidationRes
+                      , streamEventsValidationRes
+                      ]
 
   where
-    validateFrameworkVersion :: FrameworkVersion -> (Bool, [TL.Text])
+    validateFrameworkVersion :: FrameworkVersion -> ErrorMessages
     validateFrameworkVersion fv =
       let
         minRes =
@@ -587,27 +590,27 @@ validate config =
       in
         case minRes of
           LT ->
-            (False, [ TLB.toLazyText $ "Minimum version '"
-                      <> (TLB.fromString $ show (frameworkVersionMin fv))
-                      <> "' is not supported, '"
-                      <> (TLB.fromString $ show frameworkVersionMinSupported)
-                      <> "' is the minimum supported version (inclusive)"
-                    ]
-            )
+            [ TLB.toLazyText $ "Minimum version '"
+              <> (TLB.fromString $ show (frameworkVersionMin fv))
+              <> "' is not supported, '"
+              <> (TLB.fromString $ show frameworkVersionMinSupported)
+              <> "' is the minimum supported version (inclusive)"
+            ]
+
 
           _ ->
             case maxRes of
               GT ->
-                (False, [ TLB.toLazyText $ "Maximum version '"
-                          <> (TLB.fromString $ show $ frameworkVersionMax fv)
-                          <> "' is not supported, '"
-                          <> (TLB.fromString $ show frameworkVersionMaxSupported)
-                          <> "' the maximum supported version (exclusive)"
-                        ]
-                )
+                [ TLB.toLazyText $ "Maximum version '"
+                  <> (TLB.fromString $ show $ frameworkVersionMax fv)
+                  <> "' is not supported, '"
+                  <> (TLB.fromString $ show frameworkVersionMaxSupported)
+                  <> "' the maximum supported version (exclusive)"
+                ]
+
 
               _ ->
-                (True, [])
+                []
 
 
     toStreamEvents :: Serverless -> [Event]
@@ -629,14 +632,14 @@ validate config =
           False
 
 
-    validateStreamEventArn :: [Event] -> (Bool, [TL.Text])
+    validateStreamEventArn :: [Event] -> ErrorMessages
     validateStreamEventArn streamEvents =
       case filter isLeft (flip map streamEvents validateStreamEventArn') of
         [] ->
-          (True, [])
+          []
 
         xs ->
-          (False, flip map xs $ either id (\_ -> TL.empty))
+          flip map xs $ either id (\_ -> TL.empty)
 
       where
         validateStreamEventArn' event =
@@ -677,14 +680,14 @@ validate config =
           False
 
     -- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
-    validateS3EventArn :: [Event] -> (Bool, [TL.Text])
+    validateS3EventArn :: [Event] -> ErrorMessages
     validateS3EventArn s3Events =
       case filter isLeft (flip map s3Events validateS3EventArn') of
         [] ->
-          (True, [])
+          []
 
         xs ->
-          (False, flip map xs $ either id (\_ -> TL.empty))
+          flip map xs $ either id (\_ -> TL.empty)
 
       where
         validateS3EventArn' s3Event =
@@ -721,9 +724,6 @@ validate config =
           False
 
 
-type FileName = String
-
-
 main :: IO ()
 main =
   do
@@ -738,7 +738,7 @@ main =
       xs ->
         forM_ xs check
   where
-    check :: FileName -> IO ()
+    check :: FilePath -> IO ()
     check f =
       do
         res <- parse f
