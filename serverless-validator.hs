@@ -10,8 +10,7 @@
 
 import Prelude (id)
 import GHC.Show (show)
-import Protolude hiding ((<>), Prefix, show)
-import Data.Monoid ((<>))
+import Protolude hiding (Prefix, show)
 import Data.Text (Text)
 import Data.Traversable (for)
 import Data.Aeson.Types (Object, typeMismatch, withObject)
