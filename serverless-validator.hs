@@ -8,7 +8,6 @@
 
 -- Serverless.yml reference: https://serverless.com/framework/docs/providers/aws/guide/serverless.yml/
 
-import Prelude (id)
 import GHC.Show (show)
 import Protolude hiding (Prefix, show)
 import Data.Text (Text)
@@ -20,8 +19,8 @@ import qualified Data.Yaml as YML (decodeFileEither, parseJSON)
 import qualified Data.HashMap.Strict as Map (toList)
 import qualified Data.Text as T (unpack, splitOn, pack)
 import qualified Data.Text.Lazy.Read as TLR (decimal)
-import qualified Data.Text.Lazy as TL (Text, fromStrict, empty)
-import qualified Data.Text.Lazy.Builder as TLB (toLazyText, fromText, fromString)
+import qualified Data.Text.Lazy as TL (fromStrict)
+import qualified Data.Text.Lazy.Builder as TLB (toLazyText, fromString)
 import qualified Data.CaseInsensitive as CI (mk)
 import qualified System.Environment as S (getArgs)
 import qualified Text.Regex as Regex (mkRegex, matchRegex)
@@ -40,12 +39,47 @@ data Serverless
 instance FromJSON Serverless where
   parseJSON (Object o) =
     S <$> o .: "service"
-    <*> o .:? "frameworkVersion" .!= frameworkVersionLatestSupported
+    <*> (o .:? "frameworkVersion" >>= validateFrameworkVersion) .!= frameworkVersionLatestSupported
     <*> o .: "provider"
     <*> o .: "functions"
 
   parseJSON invalid =
     typeMismatch "Serverless" invalid
+
+
+validateFrameworkVersion :: Maybe FrameworkVersion -> Parser (Maybe FrameworkVersion)
+validateFrameworkVersion Nothing =
+  return Nothing
+
+validateFrameworkVersion (Just fv) =
+  let
+    minRes =
+      compare frameworkVersionMinSupported (frameworkVersionMin fv)
+
+    maxRes =
+      compare frameworkVersionMaxSupported (frameworkVersionMax fv)
+  in
+    case minRes of
+      LT ->
+        fail $ show (TLB.toLazyText $ "Minimum version '"
+                     <> (TLB.fromString $ show (frameworkVersionMin fv))
+                      <> "' is not supported, '"
+                      <> (TLB.fromString $ show frameworkVersionMinSupported)
+                      <> "' is the minimum supported version (inclusive)"
+                    )
+
+      _ ->
+        case maxRes of
+          GT ->
+            fail $ show ( TLB.toLazyText $ "Maximum version '"
+                          <> (TLB.fromString $ show $ frameworkVersionMax fv)
+                          <> "' is not supported, '"
+                          <> (TLB.fromString $ show frameworkVersionMaxSupported)
+                          <> "' the maximum supported version (exclusive)"
+                        )
+
+          _ ->
+            return $ Just fv
 
 
 data FrameworkVersion =
@@ -105,6 +139,7 @@ data SemVer =
 instance Show SemVer where
   show sv =
     show (svMajor sv) ++ "." ++ show (svMinor sv) ++ "." ++ show (svPatch sv)
+
 
 instance Ord SemVer where
   compare a b =
@@ -423,31 +458,42 @@ validArn awsSer t =
             kinesisRegex
 
 
+validateArn :: AwsService -> Text -> Parser Text
+validateArn awsSer arn =
+  case validArn awsSer arn of
+    True ->
+      return arn
+
+    False ->
+      fail $ "'" ++ (T.unpack arn) ++ "' is not a valid " ++ (show awsSer)  ++ " arn"
+
+
 parseStreamEvent :: Value -> Parser Event
-parseStreamEvent (String str) =
-  return DynamoDBEvent { dynamoDBArn = str }
+parseStreamEvent (String arn) =
+  DynamoDBEvent <$> validateArn DynamoDB arn
 
 parseStreamEvent (Object o) =
-  KinesisEvent <$> o .: "arn"
+  KinesisEvent <$> (o .: "arn" >>= validateArn Kinesis)
   <*> o .: "batchSize"
   <*> o .: "startingPosition"
   <*> o .: "enabled"
+
 
 parseStreamEvent invalid =
   typeMismatch "Stream event" invalid
 
 
 parseSnsEvent :: Value -> Parser Event
-parseSnsEvent (String str) =
-  case validArn Sns str of
+parseSnsEvent (String arn) =
+  case validArn Sns arn of
     True ->
       return SnsEvent { snsEventTopicName = Nothing
-                      , snsEventTopicArn = Just str
+                      , snsEventTopicArn = Just arn
                       , snsEventDisplayName = Nothing
                       }
 
     False ->
-      return SnsEvent { snsEventTopicName = Just str
+      return SnsEvent { snsEventTopicName = Just arn
                       , snsEventTopicArn = Nothing
                       , snsEventDisplayName = Nothing
                       }
@@ -478,11 +524,42 @@ parseScheduleEvent invalid =
 parseS3Event :: Value -> Parser Event
 parseS3Event (Object o) =
   S3Event <$> o .: "bucket"
-  <*> o .: "event"
+  <*> (o .: "event" >>= validateS3EventArn)
+  -- <*> (o .: "event" >>= bogusValidateS3EventArn)
   <*> o .:? "rules" .!= []
 
 parseS3Event invalid =
   typeMismatch "S3 Event" invalid
+
+
+bogusValidateS3EventArn :: Event -> Parser Text
+bogusValidateS3EventArn _ =
+  undefined
+
+
+-- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
+validateS3EventArn :: Text -> Parser Text
+validateS3EventArn event =
+  case validS3EventArn of
+        Nothing ->
+          fail $ "'" ++ T.unpack(event) ++ "' is not a valid s3 event arn"
+
+        _ ->
+          return event
+  where
+    validS3EventArn =
+      Regex.matchRegex s3EventArnRegex (T.unpack event)
+
+    objCreatedRegex =
+      "ObjectCreated:(\\*|Put|Post|Copy|CompleteMultipartUpload)"
+
+    objRemovedRegex =
+      "ObjectRemoved:(\\*|Delete|DeleteMarkerCreated)"
+
+    -- see TODO[1]
+    s3EventArnRegex =
+      Regex.mkRegex $ "s3:(" ++ objCreatedRegex ++ "|" ++ objRemovedRegex ++ "|ReducedRedundancyLostObject)"
+
 
 
 parseHttpEvent :: Value -> Parser Event
@@ -550,173 +627,6 @@ parse f =
   YML.decodeFileEither f
 
 
-type ErrorMessages =
-  [TL.Text]
-
-validate :: Serverless -> Either ErrorMessages ()
-validate config =
-  let
-    frameworkVersionValidationRes =
-      validateFrameworkVersion $ frameworkVersion config
-
-    s3EventsValidationRes =
-      validateS3EventArn $ toS3Events config
-
-    streamEventsValidationRes =
-      validateStreamEventArn $ toStreamEvents config
-
-    valid =
-      all null [ frameworkVersionValidationRes
-               , s3EventsValidationRes
-               , streamEventsValidationRes
-               ]
-  in
-    case valid of
-      True ->
-        Right ()
-
-      False ->
-        Left $ concat [ frameworkVersionValidationRes
-                      , s3EventsValidationRes
-                      , streamEventsValidationRes
-                      ]
-
-  where
-    validateFrameworkVersion :: FrameworkVersion -> ErrorMessages
-    validateFrameworkVersion fv =
-      let
-        minRes =
-          compare frameworkVersionMinSupported (frameworkVersionMin fv)
-
-        maxRes =
-          compare frameworkVersionMaxSupported (frameworkVersionMax fv)
-      in
-        case minRes of
-          LT ->
-            [ TLB.toLazyText $ "Minimum version '"
-              <> (TLB.fromString $ show (frameworkVersionMin fv))
-              <> "' is not supported, '"
-              <> (TLB.fromString $ show frameworkVersionMinSupported)
-              <> "' is the minimum supported version (inclusive)"
-            ]
-
-
-          _ ->
-            case maxRes of
-              GT ->
-                [ TLB.toLazyText $ "Maximum version '"
-                  <> (TLB.fromString $ show $ frameworkVersionMax fv)
-                  <> "' is not supported, '"
-                  <> (TLB.fromString $ show frameworkVersionMaxSupported)
-                  <> "' the maximum supported version (exclusive)"
-                ]
-
-
-              _ ->
-                []
-
-
-    toStreamEvents :: Serverless -> [Event]
-    toStreamEvents serverless =
-      concatMap (filterStreamEvents . functionEvents) $ getFunctions (functions serverless)
-      where
-        filterStreamEvents :: [Event] -> [Event]
-        filterStreamEvents =
-          filter isStreamEvent
-
-        isStreamEvent :: Event -> Bool
-        isStreamEvent (DynamoDBEvent _) =
-          True
-
-        isStreamEvent (KinesisEvent _ _ _ _) =
-          True
-
-        isStreamEvent _ =
-          False
-
-
-    validateStreamEventArn :: [Event] -> ErrorMessages
-    validateStreamEventArn streamEvents =
-      case filter isLeft (flip map streamEvents validateStreamEventArn') of
-        [] ->
-          []
-
-        xs ->
-          flip map xs $ either id (\_ -> TL.empty)
-
-      where
-        validateStreamEventArn' event =
-          case event of
-            DynamoDBEvent arn ->
-              case validArn DynamoDB arn of
-                True ->
-                  Right ()
-
-                False ->
-                 Left $ TLB.toLazyText ("'" <> TLB.fromText arn  <> "' is not a valid dynamoDB arn")
-
-            KinesisEvent arn _ _ _ ->
-              case validArn Kinesis arn of
-                True ->
-                  Right ()
-
-                False ->
-                  Left $ TLB.toLazyText ("'" <> TLB.fromText arn <> "' is not a valid kinesis arn")
-
-            _ ->
-              Left "Not a stream event"
-
-
-    toS3Events :: Serverless -> [Event]
-    toS3Events serverless =
-        concatMap (filterS3Events . functionEvents) $ getFunctions (functions serverless)
-      where
-        filterS3Events :: [Event] -> [Event]
-        filterS3Events =
-          filter isS3Event
-
-        isS3Event :: Event -> Bool
-        isS3Event (S3Event _ _ _) =
-          True
-
-        isS3Event _ =
-          False
-
-    -- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
-    validateS3EventArn :: [Event] -> ErrorMessages
-    validateS3EventArn s3Events =
-      case filter isLeft (flip map s3Events validateS3EventArn') of
-        [] ->
-          []
-
-        xs ->
-          flip map xs $ either id (\_ -> TL.empty)
-
-      where
-        validateS3EventArn' s3Event =
-          case s3Event of
-            S3Event _ e _ ->
-              case Regex.matchRegex s3EventArnRegex (T.unpack e) of
-                Nothing ->
-                  Left $ TLB.toLazyText ("'" <> TLB.fromText e <> "' is not a valid s3 event arn")
-
-                Just _ ->
-                  Right ()
-
-            _ ->
-              Left "Not a S3 Event"
-
-        objCreatedRegex =
-          "ObjectCreated:(\\*|Put|Post|Copy|CompleteMultipartUpload)"
-
-        objRemovedRegex =
-          "ObjectRemoved:(\\*|Delete|DeleteMarkerCreated)"
-
-        -- see TODO[1]
-        s3EventArnRegex =
-          Regex.mkRegex $ "s3:(" ++ objCreatedRegex ++ "|" ++ objRemovedRegex ++ "|ReducedRedundancyLostObject)"
-
-
 main :: IO ()
 main =
   do
@@ -740,17 +650,4 @@ main =
             print errs
 
           Right serverless ->
-            do
-              print serverless
-              case validate serverless of
-                Right _ ->
-                  print $ "The provided file '" <> f <> "' is valid"
-
-                Left errs ->
-                  do
-                    print $ "Validation of file '" <> f <> "' failed:"
-                    printErrors errs
-
-    printErrors :: ErrorMessages -> IO ()
-    printErrors errs =
-      forM_ errs (\err -> print $ "- " <> err)
+            print serverless
