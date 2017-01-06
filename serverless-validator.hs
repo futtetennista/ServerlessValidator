@@ -20,7 +20,6 @@ import qualified Data.HashMap.Strict as Map (toList)
 import qualified Data.Text as T (unpack, splitOn, pack)
 import qualified Data.Text.Lazy.Read as TLR (decimal)
 import qualified Data.Text.Lazy as TL (fromStrict)
-import qualified Data.Text.Lazy.Builder as TLB (toLazyText, fromString)
 import qualified Data.CaseInsensitive as CI (mk)
 import qualified System.Environment as S (getArgs)
 import qualified Text.Regex as Regex (mkRegex, matchRegex)
@@ -61,22 +60,16 @@ validateFrameworkVersion (Just fv) =
   in
     case minRes of
       LT ->
-        fail $ show (TLB.toLazyText $ "Minimum version '"
-                     <> (TLB.fromString $ show (frameworkVersionMin fv))
-                      <> "' is not supported, '"
-                      <> (TLB.fromString $ show frameworkVersionMinSupported)
-                      <> "' is the minimum supported version (inclusive)"
-                    )
+        fail $ "Minimum version '" ++ show (frameworkVersionMin fv)
+        ++ "' is not supported, '" ++ show frameworkVersionMinSupported
+        ++ "' is the minimum supported version (inclusive)"
 
       _ ->
         case maxRes of
           GT ->
-            fail $ show ( TLB.toLazyText $ "Maximum version '"
-                          <> (TLB.fromString $ show $ frameworkVersionMax fv)
-                          <> "' is not supported, '"
-                          <> (TLB.fromString $ show frameworkVersionMaxSupported)
-                          <> "' the maximum supported version (exclusive)"
-                        )
+            fail $ "Maximum version '" ++ show (frameworkVersionMax fv)
+            ++ "' is not supported, '" ++ show frameworkVersionMaxSupported
+            ++ "' the maximum supported version (exclusive)"
 
           _ ->
             return $ Just fv
