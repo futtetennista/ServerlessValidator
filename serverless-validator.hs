@@ -57,7 +57,7 @@ validateFrameworkVersion (Just fv) =
       compare frameworkVersionMinSupported (frameworkVersionMin fv)
 
     maxRes =
-      compare frameworkVersionMaxSupported (frameworkVersionMax fv)
+      compare (frameworkVersionMax fv) frameworkVersionMaxSupported
   in
     case minRes of
       LT ->
