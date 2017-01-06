@@ -214,12 +214,8 @@ instance FromJSON Runtime where
     typeMismatch "Runtime" invalid
 
 
-type Environment = (Text, Text)
-
-
-emptyEnvironment :: [Environment]
-emptyEnvironment =
-  []
+type Environment =
+  (Text, Text)
 
 
 data Provider
@@ -238,7 +234,7 @@ instance FromJSON Provider where
     <*> o .: "runtime"
     <*> o .:? "memorySize"
     <*> o .:? "timeout"
-    <*> o .:? "environment" .!= emptyEnvironment
+    <*> o .:? "environment" .!= []
 
   parseJSON invalid =
     typeMismatch "Provider" invalid
@@ -256,7 +252,8 @@ instance FromJSON Functions where
     where
       parseFunctions :: Object -> Parser Functions
       parseFunctions fObj =
-        fmap FS . for (Map.toList fObj) $ \(n, b) -> parseFunction n b
+        -- fmap  FS . for (Map.toList fObj) $ \(n, b) -> parseFunction n b
+        fmap FS (for (Map.toList fObj) $ \(n, b) -> parseFunction n b)
 
 
 data Function =
@@ -287,7 +284,7 @@ parseFunction fName fBody =
       <*> obj .:? "runtime"
       <*> obj .:? "memorySize"
       <*> obj .:? "timeout"
-      <*> obj .:? "environment" .!= emptyEnvironment
+      <*> obj .:? "environment" .!= []
       <*> obj .: "events"
 
 
