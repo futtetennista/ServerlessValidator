@@ -8,6 +8,8 @@
 
 -- Serverless.yml reference: https://serverless.com/framework/docs/providers/aws/guide/serverless.yml/
 
+
+import GHC.Base (String)
 import GHC.Show (show)
 import Protolude hiding (Prefix, show)
 import Data.Text (Text)
@@ -24,6 +26,7 @@ import qualified Data.CaseInsensitive as CI (mk)
 import qualified System.Environment as S (getArgs)
 import qualified Text.Regex as Regex (mkRegex, matchRegex)
 import qualified Data.Maybe as Maybe (fromJust, isJust)
+-- import qualified Data.Text.Lazy.Builder as TLB (toLazyText, fromString)
 
 
 data Serverless
@@ -38,7 +41,7 @@ data Serverless
 instance FromJSON Serverless where
   parseJSON (Object o) =
     S <$> o .: "service"
-    <*> (o .:? "frameworkVersion" >>= validateFrameworkVersion) .!= frameworkVersionLatestSupported
+    <*> (o .:? "frameworkVersion" >>= failOrReturn validateFrameworkVersion) .!= frameworkVersionLatestSupported
     <*> o .: "provider"
     <*> o .: "functions"
 
@@ -46,9 +49,9 @@ instance FromJSON Serverless where
     typeMismatch "Serverless" invalid
 
 
-validateFrameworkVersion :: Maybe FrameworkVersion -> Parser (Maybe FrameworkVersion)
+validateFrameworkVersion :: Maybe FrameworkVersion -> Either String (Maybe FrameworkVersion)
 validateFrameworkVersion Nothing =
-  return Nothing
+  Right Nothing
 
 validateFrameworkVersion (Just fv) =
   let
@@ -60,19 +63,19 @@ validateFrameworkVersion (Just fv) =
   in
     case minRes of
       LT ->
-        fail $ "Minimum version '" ++ show (frameworkVersionMin fv)
-        ++ "' is not supported, '" ++ show frameworkVersionMinSupported
-        ++ "' is the minimum supported version (inclusive)"
+        Left $ "Minimum version '" <> show (frameworkVersionMin fv)
+        <> "' is not supported, '" <> show frameworkVersionMinSupported
+        <> "' is the minimum supported version (inclusive)"
 
       _ ->
         case maxRes of
           GT ->
-            fail $ "Maximum version '" ++ show (frameworkVersionMax fv)
-            ++ "' is not supported, '" ++ show frameworkVersionMaxSupported
-            ++ "' the maximum supported version (exclusive)"
+            Left $ "Maximum version '" <> show (frameworkVersionMax fv)
+            <> "' is not supported, '" <> show frameworkVersionMaxSupported
+            <> "' the maximum supported version (exclusive)"
 
           _ ->
-            return $ Just fv
+            Right $ Just fv
 
 
 data FrameworkVersion =
@@ -448,22 +451,22 @@ validArn awsSer t =
             kinesisRegex
 
 
-validateArn :: AwsService -> Text -> Parser Text
+validateArn :: AwsService -> Text -> Either String Text
 validateArn awsSer arn =
   case validArn awsSer arn of
     True ->
-      return arn
+      Right arn
 
     False ->
-      fail $ "'" ++ (T.unpack arn) ++ "' is not a valid " ++ (show awsSer)  ++ " arn"
+      Left $ "'" <> T.unpack(arn) <> "' is not a valid " <> (show awsSer)  <> " arn"
 
 
 parseStreamEvent :: Value -> Parser Event
 parseStreamEvent (String arn) =
-  DynamoDBEvent <$> validateArn DynamoDB arn
+  DynamoDBEvent <$> failOrReturn (validateArn DynamoDB) arn
 
 parseStreamEvent (Object o) =
-  KinesisEvent <$> (o .: "arn" >>= validateArn Kinesis)
+  KinesisEvent <$> (o .: "arn" >>= failOrReturn (validateArn Kinesis))
   <*> o .: "batchSize"
   <*> o .: "startingPosition"
   <*> o .: "enabled"
@@ -511,31 +514,30 @@ parseScheduleEvent invalid =
   typeMismatch "Schedule Event" invalid
 
 
+failOrReturn :: Show a => (b -> Either a b) -> b -> Parser b
+failOrReturn validator =
+  either (fail . show) return . validator
+
+
 parseS3Event :: Value -> Parser Event
 parseS3Event (Object o) =
   S3Event <$> o .: "bucket"
-  <*> (o .: "event" >>= validateS3EventArn)
-  -- <*> (o .: "event" >>= bogusValidateS3EventArn)
+  <*> (o .: "event" >>= failOrReturn validateS3EventArn)
   <*> o .:? "rules" .!= []
 
 parseS3Event invalid =
   typeMismatch "S3 Event" invalid
 
 
-bogusValidateS3EventArn :: Event -> Parser Text
-bogusValidateS3EventArn _ =
-  undefined
-
-
 -- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
-validateS3EventArn :: Text -> Parser Text
+validateS3EventArn :: Text -> Either Text Text
 validateS3EventArn event =
   case validS3EventArn of
         Nothing ->
-          fail $ "'" ++ T.unpack(event) ++ "' is not a valid s3 event arn"
+          Left $ "'" <> event <> "' is not a valid s3 event arn"
 
         _ ->
-          return event
+          Right event
   where
     validS3EventArn =
       Regex.matchRegex s3EventArnRegex (T.unpack event)
@@ -565,7 +567,7 @@ parseHttpEvent (String config) =
                            }
 
         Left err ->
-          fail $ T.unpack ("Unknown HTTP method: " <> err)
+          fail $ "Unknown HTTP method: " ++ T.unpack err
 
     _ ->
       fail "HTTP string must contain only a HTTP method and a path, i.e. 'http: GET foo'"
@@ -636,8 +638,11 @@ main =
       do
         res <- parse f
         case res of
-          Left errs ->
-            print errs
+          Left err ->
+            do
+              putStrLn $ "'" ++ f ++ "' is not valid"
+              print err
 
           Right serverless ->
-            print serverless
+            -- print serverless
+            putStrLn $ "'" ++ f ++ "' is valid"
