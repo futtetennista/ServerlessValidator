@@ -9,7 +9,7 @@
 -- Serverless.yml reference: https://serverless.com/framework/docs/providers/aws/guide/serverless.yml/
 
 
-import GHC.Base (String)
+import GHC.Base (String, id)
 import GHC.Show (show)
 import Protolude hiding (Prefix, show)
 import Data.Text (Text)
@@ -25,7 +25,7 @@ import qualified Data.Text.Lazy as TL (fromStrict)
 import qualified Data.CaseInsensitive as CI (mk)
 import qualified System.Environment as S (getArgs)
 import qualified Text.Regex as Regex (mkRegex, matchRegex)
-import qualified Data.Maybe as Maybe (fromJust, isJust)
+import qualified Data.Maybe as Maybe (fromJust, isJust, maybe)
 -- import qualified Data.Text.Lazy.Builder as TLB (toLazyText, fromString)
 
 
@@ -38,22 +38,36 @@ data Serverless
   deriving Show
 
 
+mkServerless :: Text -> Maybe FrameworkVersion -> Provider -> Functions -> Either Text Serverless
+mkServerless _ (Just fv) _ _ | isLeft res =
+                               Left $ either T.pack undefined res -- TODO: what can I use here instead of undefined?! It should always be a failure so it should be safe but still…
+  where
+    res =
+      validateFrameworkVersion fv
+
+mkServerless s fv p fs =
+  Right $ S { service = s
+            , frameworkVersion = Maybe.maybe frameworkVersionLatestSupported id fv
+            , provider = p
+            , functions = fs
+            }
+
+
 instance FromJSON Serverless where
   parseJSON (Object o) =
-    S <$> o .: "service"
-    <*> (o .:? "frameworkVersion" >>= failOrReturn validateFrameworkVersion) .!= frameworkVersionLatestSupported
-    <*> o .: "provider"
-    <*> o .: "functions"
+    do
+      res <- mkServerless <$> o .: "service"
+        <*> o .:? "frameworkVersion"
+        <*> o .: "provider"
+        <*> o .: "functions"
+      either (fail . T.unpack) return res
 
   parseJSON invalid =
     typeMismatch "Serverless" invalid
 
 
-validateFrameworkVersion :: Maybe FrameworkVersion -> Either String (Maybe FrameworkVersion)
-validateFrameworkVersion Nothing =
-  Right Nothing
-
-validateFrameworkVersion (Just fv) =
+validateFrameworkVersion :: FrameworkVersion -> Either String (Maybe FrameworkVersion)
+validateFrameworkVersion fv =
   let
     minRes =
       compare frameworkVersionMinSupported (frameworkVersionMin fv)
@@ -63,9 +77,10 @@ validateFrameworkVersion (Just fv) =
   in
     case minRes of
       LT ->
-        Left $ "Minimum version '" <> show (frameworkVersionMin fv)
-        <> "' is not supported, '" <> show frameworkVersionMinSupported
-        <> "' is the minimum supported version (inclusive)"
+        Left minimumVersionNotSupported
+
+      GT ->
+        Left minimumVersionNotSupported
 
       _ ->
         case maxRes of
@@ -76,7 +91,11 @@ validateFrameworkVersion (Just fv) =
 
           _ ->
             Right $ Just fv
-
+  where
+    minimumVersionNotSupported =
+      "Minimum version '" <> show (frameworkVersionMin fv)
+      <> "' is not supported, '" <> show frameworkVersionMinSupported
+      <> "' is the minimum supported version (inclusive)"
 
 data FrameworkVersion =
   FV { frameworkVersionMin :: SemVer
@@ -451,51 +470,69 @@ validArn awsSer t =
             kinesisRegex
 
 
-validateArn :: AwsService -> Text -> Either String Text
-validateArn awsSer arn =
-  case validArn awsSer arn of
-    True ->
-      Right arn
+mkDynamoDBEvent :: Text -> Either Text Event
+mkDynamoDBEvent arn | not . (validArn DynamoDB) $ arn =
+                      Left $ "'" <> arn <> "' is not a valid " <> T.pack(show DynamoDB) <> " arn"
 
-    False ->
-      Left $ "'" <> T.unpack(arn) <> "' is not a valid " <> (show awsSer)  <> " arn"
+mkDynamoDBEvent arn =
+  Right $ DynamoDBEvent { dynamoDBArn = arn }
+
+
+mkKinesisEvent :: Text -> Int -> Text -> Bool -> Either Text Event
+mkKinesisEvent arn _ _ _ | not . (validArn Kinesis) $ arn =
+                           Left $ "'" <> arn <> "' is not a valid " <> T.pack(show Kinesis) <> " arn"
+
+mkKinesisEvent arn batchSize startingPosition enabled =
+  Right $ KinesisEvent { kinesisArn = arn
+                       , kinesisBatchSize = batchSize
+                       , kinesisStartingPosition = startingPosition
+                       , kinesisEnabled = enabled
+                       }
 
 
 parseStreamEvent :: Value -> Parser Event
 parseStreamEvent (String arn) =
-  DynamoDBEvent <$> failOrReturn (validateArn DynamoDB) arn
+  either (fail . T.unpack) return $ mkDynamoDBEvent arn
 
 parseStreamEvent (Object o) =
-  KinesisEvent <$> (o .: "arn" >>= failOrReturn (validateArn Kinesis))
-  <*> o .: "batchSize"
-  <*> o .: "startingPosition"
-  <*> o .: "enabled"
+  do
+    res <- mkKinesisEvent <$> o .: "arn"
+      <*> o .: "batchSize"
+      <*> o .: "startingPosition"
+      <*> o .: "enabled"
+    either (fail . T.unpack) return res
 
 
 parseStreamEvent invalid =
   typeMismatch "Stream event" invalid
 
 
+mkSnsEvent :: Text -> Maybe Text -> Event
+mkSnsEvent arn _ | validArn Sns arn =
+                     SnsEvent { snsEventTopicName = Nothing
+                              , snsEventTopicArn = Just arn
+                              , snsEventDisplayName = Nothing
+                              }
+
+mkSnsEvent topicName Nothing | not . validArn Sns $ topicName =
+                               SnsEvent { snsEventTopicName = Just topicName
+                                        , snsEventTopicArn = Nothing
+                                        , snsEventDisplayName = Nothing
+                                        }
+
+mkSnsEvent topicName displayName =
+  SnsEvent { snsEventTopicName = Just topicName
+           , snsEventTopicArn = Nothing
+           , snsEventDisplayName = displayName
+           }
+
+
 parseSnsEvent :: Value -> Parser Event
 parseSnsEvent (String arn) =
-  case validArn Sns arn of
-    True ->
-      return SnsEvent { snsEventTopicName = Nothing
-                      , snsEventTopicArn = Just arn
-                      , snsEventDisplayName = Nothing
-                      }
-
-    False ->
-      return SnsEvent { snsEventTopicName = Just arn
-                      , snsEventTopicArn = Nothing
-                      , snsEventDisplayName = Nothing
-                      }
-
+   return $ mkSnsEvent arn Nothing
 
 parseSnsEvent (Object o) =
-  SnsEvent <$> o .: "topicName"
-  <*> return Nothing
-  <*> o .: "displayName"
+  mkSnsEvent <$> o .: "topicName" <*> o .:? "displayName"
 
 parseSnsEvent invalid =
   typeMismatch "Sns Event" invalid
@@ -519,29 +556,34 @@ failOrReturn validator =
   either (fail . show) return . validator
 
 
+mkS3Event :: Text -> Text -> [S3EventRule] -> Either Text Event
+mkS3Event _ event _ | invalidArn =
+                      Left $ "'" <> event <> "' is not a valid s3 event arn"
+  where
+    invalidArn =
+      not . Maybe.isJust $ isValidS3EventArn event
+
+mkS3Event bucket event rules =
+  Right $ S3Event { s3EventBucket = bucket
+                  , s3EventEvent = event
+                  , s3EventRules = rules
+                  }
+
 parseS3Event :: Value -> Parser Event
 parseS3Event (Object o) =
-  S3Event <$> o .: "bucket"
-  <*> (o .: "event" >>= failOrReturn validateS3EventArn)
-  <*> o .:? "rules" .!= []
+  do
+    res <- mkS3Event <$> o .: "bucket" <*> o .: "event" <*> o .:? "rules" .!= []
+    either (fail . T.unpack) return res
 
 parseS3Event invalid =
   typeMismatch "S3 Event" invalid
 
 
 -- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
-validateS3EventArn :: Text -> Either Text Text
-validateS3EventArn event =
-  case validS3EventArn of
-        Nothing ->
-          Left $ "'" <> event <> "' is not a valid s3 event arn"
-
-        _ ->
-          Right event
+isValidS3EventArn :: Text -> Maybe [String]
+isValidS3EventArn event =
+  Regex.matchRegex s3EventArnRegex (T.unpack event)
   where
-    validS3EventArn =
-      Regex.matchRegex s3EventArnRegex (T.unpack event)
-
     objCreatedRegex =
       "ObjectCreated:(\\*|Put|Post|Copy|CompleteMultipartUpload)"
 
@@ -644,5 +686,6 @@ main =
               print err
 
           Right serverless ->
-            -- print serverless
-            putStrLn $ "'" ++ f ++ "' is valid"
+            do
+              print serverless
+              putStrLn $ "'" ++ f ++ "' is valid"
