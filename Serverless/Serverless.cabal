@@ -1,0 +1,69 @@
+name:                Serverless
+version:             0.1.0.0
+synopsis:            Initial project template from stack, using hspec and quickcheck
+description:         Please see README.md
+homepage:            https://github.com/githubuser/Serverless#readme
+license:             BSD3
+license-file:        LICENSE
+author:              Author name here
+maintainer:          example@example.com
+copyright:           2017 Author name here
+category:            Web
+build-type:          Simple
+extra-source-files:  README.md
+cabal-version:       >=1.10
+
+library
+  hs-source-dirs:      src
+  exposed-modules:     ServerlessValidator
+  build-depends:       base >= 4.7 && < 5
+                     , protolude >= 0.1.10 && < 0.1.11
+                     , text >= 1.2.2.1 && < 1.2.3
+                     , aeson >= 0.11.2.1 && < 1.0.0.0
+                     , yaml >= 0.8.21.1 && < 0.8.22.0
+                     , unordered-containers >= 0.2.7.2 && < 0.2.8.0
+                     , case-insensitive >= 1.2.0.7 && < 1.2.1.0
+                     , regex-compat >= 0.95.1 && < 0.96
+  default-language:    Haskell2010
+  default-extensions:  OverloadedStrings, NoImplicitPrelude
+
+executable Serverless
+  hs-source-dirs:      app
+  main-is:             Main.hs
+  ghc-options:         -threaded
+                       -rtsopts
+                       -with-rtsopts=-N
+                       -fwarn-tabs
+                       -fwarn-unused-imports
+                       -fwarn-missing-signatures
+                       -fwarn-name-shadowing
+                       -fwarn-incomplete-patterns
+  build-depends:       base
+                     , Serverless
+                     , protolude >= 0.1.10 && < 0.1.11
+  default-language:    Haskell2010
+  default-extensions:  OverloadedStrings, NoImplicitPrelude
+
+test-suite Serverless-test
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test
+  main-is:             Spec.hs
+  build-depends:       base
+                     , Serverless
+                     , protolude >= 0.1.10 && < 0.1.11
+                     , hspec >= 2.2.4 && < 2.3.0
+                     , QuickCheck
+  ghc-options:         -threaded
+                       -rtsopts
+                       -with-rtsopts=-N
+                       -fwarn-tabs
+                       -fwarn-unused-imports
+                       -fwarn-missing-signatures
+                       -fwarn-name-shadowing
+                       -fwarn-incomplete-patterns
+  default-language:    Haskell2010
+  default-extensions:  OverloadedStrings, NoImplicitPrelude
+
+source-repository head
+  type:     git
+  location: https://github.com/futtetennista/ServerlessValidator

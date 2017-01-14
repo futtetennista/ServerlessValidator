@@ -1,0 +1,62 @@
+service: MyService
+
+frameworkVersion: ">=1.0.0 <2.0.0"
+
+provider:
+  name: foobar
+  runtime: nodejs4.3
+
+functions:
+# HTTP Events
+  foo1:
+    handler: handler.foo1
+    events:
+      - http: GET foo
+
+  foo2:
+    handler: handler.foo2
+    events:
+      - http:
+          path: postit
+          method: POST
+# S3 Events
+  foo3:
+    handler: handler.foo3
+    events:
+      - s3:
+          bucket: test
+          event: s3:ObjectRemoved:*
+          rules:
+            - prefix: foo/
+            - suffix: .bar
+# Sns Events
+  foo4:
+    handler: handler.foo4
+    events:
+      - sns: foobar
+
+  foo5:
+    handler: handler.foo5
+    events:
+      - sns: arn:aws:sns:*:123456789012:my_corporate_topic
+
+  foo6:
+    handler: handler.foo6
+    events:
+      - sns:
+          topicName: foobar
+          displayName: Data aggregation pipeline
+# Stream Events
+  foo7:
+    handler: handler.foo7
+    events:
+      - stream:
+          arn: arn:aws:kinesis:us-east-1:123456789012:stream/example-stream-name
+          batchSize: 100
+          startingPosition: LATEST
+          enabled: false
+
+  foo8:
+    handler: handler.foo8
+    events:
+      - stream: arn:aws:dynamodb:us-east-1:123456789012:table/books_table
