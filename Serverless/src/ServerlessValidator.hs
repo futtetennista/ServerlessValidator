@@ -56,8 +56,14 @@ import qualified Data.Maybe as Maybe (fromJust, isJust, maybe)
 import qualified Data.Text.Lazy.Builder as TLB (toLazyText, fromString)
 
 
+type ErrorMsg = Text
+
+
+type ServiceName = Text
+
+
 data Serverless
-  = S { service :: Text
+  = S { service :: ServiceName
       , frameworkVersion :: FrameworkVersion
       , provider :: Provider
       , functions :: Functions
@@ -65,7 +71,7 @@ data Serverless
   deriving Show
 
 
-mkServerless :: Text -> Maybe FrameworkVersion -> Provider -> Functions -> Either Text Serverless
+mkServerless :: ServiceName -> Maybe FrameworkVersion -> Provider -> Functions -> Either ErrorMsg Serverless
 mkServerless s fv p fs =
   Right $ S { service = s
             , frameworkVersion = Maybe.maybe frameworkVersionLatestSupported id fv
@@ -94,7 +100,7 @@ data FrameworkVersion =
   deriving (Show, Eq)
 
 
-mkFrameworkVersion :: Text -> Either Text FrameworkVersion
+mkFrameworkVersion :: Text -> Either ErrorMsg FrameworkVersion
 mkFrameworkVersion version =
   let
     -- TODO[1]: is this re-compiled each time? Shall it be moved this to the outer scope?!
@@ -121,16 +127,21 @@ mkFrameworkVersion version =
         Left "Framework version must be a string of the form: >=x.x.x <x.x.x"
 
 
-validateFrameworkVersionRange :: SemVer -> SemVer -> Either Text FrameworkVersion
-validateFrameworkVersionRange semVerMin semVerMax  =
-  let
-    minRes =
-      compare frameworkVersionMinSupported semVerMin
+type MinSemVer = SemVer
 
-    maxRes =
-      compare semVerMax frameworkVersionMaxSupported
+type MaxSemVer = SemVer
+
+
+validateFrameworkVersionRange :: MinSemVer -> MaxSemVer -> Either ErrorMsg FrameworkVersion
+validateFrameworkVersionRange minSV maxSV  =
+  let
+    minOrd =
+      compare frameworkVersionMinSupported minSV
+
+    maxOrd =
+      compare maxSV frameworkVersionMaxSupported
   in
-    case minRes of
+    case minOrd of
       LT ->
         Left minimumVersionNotSupported
 
@@ -138,21 +149,21 @@ validateFrameworkVersionRange semVerMin semVerMax  =
         Left minimumVersionNotSupported
 
       _ ->
-        case maxRes of
+        case maxOrd of
           GT ->
             let
               err =
-                TLB.toLazyText $ "Maximum version '" <> (TLB.fromString $ show semVerMax) <> "' is not supported, '" <> (TLB.fromString $ show frameworkVersionMaxSupported) <> "' the maximum supported version (exclusive)"
+                TLB.toLazyText $ "Maximum version '" <> (TLB.fromString $ show maxSV) <> "' is not supported, '" <> (TLB.fromString $ show frameworkVersionMaxSupported) <> "' the maximum supported version (exclusive)"
             in
               Left . TL.toStrict $ err
 
           _ ->
-            Right FV { frameworkVersionMin = semVerMin
-                     , frameworkVersionMax = semVerMax
+            Right FV { frameworkVersionMin = minSV
+                     , frameworkVersionMax = maxSV
                      }
   where
     minimumVersionNotSupported =
-      TL.toStrict (TLB.toLazyText $ "Minimum version '" <> (TLB.fromString $ show semVerMin) <> "' is not supported, '" <> (TLB.fromString $ show frameworkVersionMinSupported) <> "' is the minimum supported version (inclusive)")
+      TL.toStrict (TLB.toLazyText $ "Minimum version '" <> (TLB.fromString $ show minSV) <> "' is not supported, '" <> (TLB.fromString $ show frameworkVersionMinSupported) <> "' is the minimum supported version (inclusive)")
 
 
 instance FromJSON FrameworkVersion where
@@ -225,32 +236,26 @@ data Runtime
   = NodeJs
   | Python
   | Java
-  deriving Show
+  deriving (Show, Eq)
+
+
+mkRuntime :: Text -> Either ErrorMsg Runtime
+mkRuntime "nodejs4.3" =
+  Right NodeJs
+
+mkRuntime "java8" =
+  Right Java
+
+mkRuntime "python2.7" =
+  Right Python
+
+mkRuntime unknown =
+  Left $ "Unsupported runtime '" <> unknown <> "'.\nLegal values are: nodejs4.3, java8, python2.8"
 
 
 instance FromJSON Runtime where
-  parseJSON (String r) =
-    case toRuntime r of
-      Right rt ->
-        return rt
-
-      Left err ->
-        fail $ T.unpack err
-    where
-      toRuntime :: Text -> Either Text Runtime
-      toRuntime rt =
-        case rt of
-          "nodejs4.3" ->
-            Right NodeJs
-
-          "java8" ->
-            Right Java
-
-          "python2.7" ->
-            Right Python
-
-          _ ->
-            Left $ "Unsupported runtime '" <> rt <> "'"
+  parseJSON (String rt) =
+    either (fail . T.unpack) return $ mkRuntime rt
 
   parseJSON invalid =
     typeMismatch "Runtime" invalid
@@ -312,9 +317,12 @@ data Function =
   deriving Show
 
 
-parseFunction :: Text -> Value -> Parser Function
+type FunctionName = Text
+
+
+parseFunction :: FunctionName -> Value -> Parser Function
 parseFunction fName fBody =
-  withObject "Function" (\fObj -> parseFunctionBody fObj) fBody
+  withObject "Function" parseFunctionBody fBody
 
   where
     parseFunctionBody :: Object -> Parser Function
@@ -412,22 +420,34 @@ data S3EventRule
   deriving Show
 
 
+type S3EventRuleValue = Text
+
+
+type S3EventRuleKey = Text
+
+
+mkS3EventRule :: S3EventRuleKey -> S3EventRuleValue -> Either ErrorMsg S3EventRule
+mkS3EventRule "suffix" suffix =
+  Right $ Suffix suffix
+
+mkS3EventRule "prefix" prefix =
+  Right $ Prefix prefix
+
+mkS3EventRule _ _ =
+  Left "'prefix' or 'suffix' string"
+
+
 instance FromJSON S3EventRule where
   parseJSON value =
-    withObject "S3 Event Rule" (\obj -> parseRule $ Map.toList obj) value
+    withObject "S3 Event Rule" (unpackRule . Map.toList) value
 
     where
-      parseRule :: [(Text, Value)] -> Parser S3EventRule
-      parseRule entries =
-        case entries of
-          [("suffix", String suffix)] ->
-            return $ Suffix suffix
+      unpackRule :: [(Text, Value)] -> Parser S3EventRule
+      unpackRule [(k, String v)] =
+        either (fail . T.unpack) return $ mkS3EventRule k v
 
-          [("prefix", String prefix)] ->
-            return $ Prefix prefix
-
-          _ ->
-            typeMismatch "'prefix' or 'suffix' string" value
+      unpackRule _ =
+        typeMismatch "Invalid S3 Event Rule" value
 
 
 instance FromJSON Event where
@@ -469,9 +489,12 @@ data AwsService
   deriving Show
 
 
-validArn :: AwsService -> Text -> Bool
-validArn awsSer t =
-  Maybe.isJust $ Regex.matchRegex arnRegex (T.unpack t)
+type Arn = Text
+
+
+validArn :: AwsService -> Arn -> Bool
+validArn awsSer arn =
+  Maybe.isJust $ Regex.matchRegex arnRegex (T.unpack arn)
   where
     arnRegex =
       let
@@ -497,7 +520,7 @@ validArn awsSer t =
             kinesisRegex
 
 
-mkDynamoDBEvent :: Text -> Either Text Event
+mkDynamoDBEvent :: Arn -> Either Text Event
 mkDynamoDBEvent arn | not . (validArn DynamoDB) $ arn =
                       Left $ "'" <> arn <> "' is not a valid " <> T.pack(show DynamoDB) <> " arn"
 
@@ -505,7 +528,7 @@ mkDynamoDBEvent arn =
   Right $ DynamoDBEvent { dynamoDBArn = arn }
 
 
-mkKinesisEvent :: Text -> Int -> Text -> Bool -> Either Text Event
+mkKinesisEvent :: Arn -> Int -> Text -> Bool -> Either Text Event
 mkKinesisEvent arn _ _ _ | not . (validArn Kinesis) $ arn =
                            Left $ "'" <> arn <> "' is not a valid " <> T.pack(show Kinesis) <> " arn"
 
@@ -534,7 +557,7 @@ parseStreamEvent invalid =
   typeMismatch "Stream event" invalid
 
 
-mkSnsEvent :: Text -> Maybe Text -> Event
+mkSnsEvent :: Arn -> Maybe Text -> Event
 mkSnsEvent arn _ | validArn Sns arn =
                      SnsEvent { snsEventTopicName = Nothing
                               , snsEventTopicArn = Just arn
@@ -578,7 +601,13 @@ parseScheduleEvent invalid =
   typeMismatch "Schedule Event" invalid
 
 
-mkS3Event :: Text -> Text -> [S3EventRule] -> Either Text Event
+type S3Bucket = Text
+
+
+type S3Event = Text
+
+
+mkS3Event :: S3Bucket -> S3Event -> [S3EventRule] -> Either ErrorMsg Event
 mkS3Event _ event _ | invalidArn =
                       Left $ "'" <> event <> "' is not a valid s3 event arn"
   where
@@ -601,20 +630,23 @@ parseS3Event invalid =
   typeMismatch "S3 Event" invalid
 
 
+type S3EventArn = Text
+
+
 -- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
-isValidS3EventArn :: Text -> Bool
+isValidS3EventArn :: S3EventArn -> Bool
 isValidS3EventArn event =
   Maybe.maybe False (\_ -> True) $ Regex.matchRegex s3EventArnRegex (T.unpack event)
   where
-    objCreatedRegex =
-      "ObjectCreated:(\\*|Put|Post|Copy|CompleteMultipartUpload)"
-
-    objRemovedRegex =
-      "ObjectRemoved:(\\*|Delete|DeleteMarkerCreated)"
-
     -- see TODO[1]
     s3EventArnRegex =
       let
+        objCreatedRegex =
+          "ObjectCreated:(\\*|Put|Post|Copy|CompleteMultipartUpload)"
+
+        objRemovedRegex =
+          "ObjectRemoved:(\\*|Delete|DeleteMarkerCreated)"
+
         regexBuilder =
           TLB.toLazyText $ "s3:(" <> objCreatedRegex <> "|" <> objRemovedRegex <> "|ReducedRedundancyLostObject)"
       in
@@ -630,7 +662,10 @@ mkHttpEvent path method cors private =
             }
 
 
-mkHttpEventFromString :: Text -> Either Text Event
+type HttpEventConfig = Text
+
+
+mkHttpEventFromString :: HttpEventConfig -> Either ErrorMsg Event
 mkHttpEventFromString config =
   case (T.splitOn " " config) of
     [httpMethodStr, httpEndpoint] ->
@@ -657,7 +692,7 @@ parseHttpEvent invalid =
   typeMismatch "HTTP Event" invalid
 
 
-toHttpMethod :: Text -> Either Text HttpMethod
+toHttpMethod :: Text -> Either ErrorMsg HttpMethod
 toHttpMethod httpMethodStr =
   case CI.mk httpMethodStr of
     "get" ->
