@@ -52,6 +52,7 @@ test-suite Serverless-test
                      , Serverless
                      , protolude >= 0.1.10 && < 0.1.11
                      , hspec >= 2.2.4 && < 2.3.0
+                     , aeson >= 0.11.2.1 && < 1.0.0.0
                      , QuickCheck
   ghc-options:         -threaded
                        -rtsopts

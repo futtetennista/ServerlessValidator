@@ -29,10 +29,10 @@ TODOs:
 -}
 
 module ServerlessValidator ( main
-                           , isValidS3EventArn
-                           , mkFrameworkVersion
                            , toSemVer
                            , FrameworkVersion(..)
+                           , Runtime(..)
+                           , Event(..)
                            )
 where
 
