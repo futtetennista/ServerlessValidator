@@ -12,7 +12,7 @@ functions:
     handler: handler.foo1
     events:
       - http: GET foo
-
+      - http: POST foo
   foo2:
     handler: handler.foo2
     events:

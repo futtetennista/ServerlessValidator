@@ -7,32 +7,12 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 
 -- Serverless.yml reference: https://serverless.com/framework/docs/providers/aws/guide/serverless.yml/
-
-{-|
-
-Things learned:
-
-- JSON parsing with dynamic JSON objs
-- Modelling data structs from JSON objs
-- String handling
-- Regex libs
-
-TODOs:
-
-- Testing: https://www.reddit.com/r/haskell/comments/5mrk20/haskell_testing_frameworks_what_do_you_use/
-  - Quickcheck
-  - https://hackage.haskell.org/package/HUnit
-  - https://hspec.github.io/
-- create stack project
-- run script using Docker : probably need a shell script to first copy the files in the container and then run the validation
-
--}
-
 module ServerlessValidator ( main
                            , toSemVer
                            , FrameworkVersion(..)
                            , Runtime(..)
                            , Event(..)
+                           , AwsService(..)
                            )
 where
 
@@ -56,10 +36,12 @@ import qualified Data.Maybe as Maybe (fromJust, isJust, maybe)
 import qualified Data.Text.Lazy.Builder as TLB (toLazyText, fromString)
 
 
-type ErrorMsg = Text
+type ErrorMsg =
+  Text
 
 
-type ServiceName = Text
+type ServiceName =
+  Text
 
 
 data Serverless
@@ -127,9 +109,11 @@ mkFrameworkVersion version =
         Left "Framework version must be a string of the form: >=x.x.x <x.x.x"
 
 
-type MinSemVer = SemVer
+type MinSemVer =
+  SemVer
 
-type MaxSemVer = SemVer
+type MaxSemVer =
+  SemVer
 
 
 validateFrameworkVersionRange :: MinSemVer -> MaxSemVer -> Either ErrorMsg FrameworkVersion
@@ -250,7 +234,7 @@ mkRuntime "python2.7" =
   Right Python
 
 mkRuntime unknown =
-  Left $ "Unsupported runtime '" <> unknown <> "'.\nLegal values are: nodejs4.3, java8, python2.8"
+  Left $ "Unsupported runtime '" <> unknown <> "'.\nLegal values are: 'nodejs4.3', 'java8', 'python2.8'"
 
 
 instance FromJSON Runtime where
@@ -317,7 +301,8 @@ data Function =
   deriving Show
 
 
-type FunctionName = Text
+type FunctionName =
+  Text
 
 
 parseFunction :: FunctionName -> Value -> Parser Function
@@ -338,7 +323,8 @@ parseFunction fName fBody =
       <*> obj .: "events"
 
 
-type Path = Text
+type Path =
+  Text
 
 
 data Event
@@ -420,10 +406,12 @@ data S3EventRule
   deriving Show
 
 
-type S3EventRuleValue = Text
+type S3EventRuleValue =
+  Text
 
 
-type S3EventRuleKey = Text
+type S3EventRuleKey =
+  Text
 
 
 mkS3EventRule :: S3EventRuleKey -> S3EventRuleValue -> Either ErrorMsg S3EventRule
@@ -486,10 +474,11 @@ data AwsService
   = Sns
   | DynamoDB
   | Kinesis
-  deriving Show
+  deriving (Show, Eq)
 
 
-type Arn = Text
+type Arn =
+  Text
 
 
 validArn :: AwsService -> Arn -> Bool
@@ -601,10 +590,12 @@ parseScheduleEvent invalid =
   typeMismatch "Schedule Event" invalid
 
 
-type S3Bucket = Text
+type S3Bucket =
+  Text
 
 
-type S3Event = Text
+type S3Event =
+  Text
 
 
 mkS3Event :: S3Bucket -> S3Event -> [S3EventRule] -> Either ErrorMsg Event
@@ -630,7 +621,8 @@ parseS3Event invalid =
   typeMismatch "S3 Event" invalid
 
 
-type S3EventArn = Text
+type S3EventArn =
+  Text
 
 
 -- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
@@ -662,7 +654,8 @@ mkHttpEvent path method cors private =
             }
 
 
-type HttpEventConfig = Text
+type HttpEventConfig =
+  Text
 
 
 mkHttpEventFromString :: HttpEventConfig -> Either ErrorMsg Event
