@@ -1,5 +1,18 @@
 #!/usr/bin/env stack
--- stack --resolver lts-7.10 --install-ghc runghc --package yaml
+{- stack
+ --resolver lts-7.10
+ --install-ghc runghc
+ --package base
+ --package protolude
+ --package text
+ --package aeson
+ --package yaml
+ --package unordered-containers
+ --package case-insensitive
+ --package regex-compat
+ --
+ -hide-all-packages
+-}
 
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
