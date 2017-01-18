@@ -14,8 +14,6 @@
  -hide-all-packages
 -}
 
-{-# OPTIONS_GHC -Wall #-}
-{-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
