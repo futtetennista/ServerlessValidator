@@ -37,7 +37,7 @@ executable ServerlessValidator
   ghc-options:         -threaded
                        -rtsopts
                        -with-rtsopts=-N
-                       -WAll
+                       -Wall
   build-depends:       base
                      , ServerlessValidator
                      , protolude >= 0.1.10 && < 0.1.11
