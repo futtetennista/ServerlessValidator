@@ -245,7 +245,7 @@ mkRuntime "python2.7" =
   Right Python
 
 mkRuntime unknown =
-  Left $ "Unsupported runtime '" <> unknown <> "'.\nLegal values are: 'nodejs4.3', 'java8', 'python2.8'"
+  Left $ "Unsupported runtime '" <> unknown <> "'. Choose one among: 'nodejs4.3', 'java8', 'python2.8'"
 
 
 instance FromJSON Runtime where
