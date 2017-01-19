@@ -1,7 +1,7 @@
 ## -*- docker-image-name: "serverless-validator" -*-
 FROM haskell:latest
 
-RUN stack --resolver lts-7.10 \
+RUN stack --resolver lts-7.15 \
     --install-ghc \
     install base protolude text aeson yaml unordered-containers case-insensitive regex-compat
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env stack
 {- stack
- --resolver lts-7.10
+ --resolver lts-7.15
  --install-ghc runghc
  --package base
  --package protolude
