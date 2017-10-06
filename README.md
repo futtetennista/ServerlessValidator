@@ -1,6 +1,6 @@
 # Serverless Validator
 
-Validates [Serverless](serverless.com) YML files.
+Validates [Serverless](https://serverless.com/) YML files.
 
 ## Usage
 
