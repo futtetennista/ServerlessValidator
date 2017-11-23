@@ -11,17 +11,12 @@ import qualified Data.Maybe as Maybe (fromJust)
 
 spec :: Spec
 spec =
-  do
-    describe "Serverless Validator" $ do
-      it "validates framework version" testFrameworkVersionValidation
-
-      it "validates λ function runtimes" testRuntimeValidation
-
-      it "validates S3 events arn" testS3EventsValidation
-
-      it "validates stream events" $ testStreamEventsValidation
-
-      it "validates SNS events" $ testSnsEventsValidation
+  describe "Serverless Validator" $
+    it "validates framework version" testFrameworkVersionValidation
+    it "validates λ function runtimes" testRuntimeValidation
+    it "validates S3 events arn" testS3EventsValidation
+    it "validates stream events" testStreamEventsValidation
+    it "validates SNS events" testSnsEventsValidation
 
 
 testSnsEventsValidation :: Expectation
@@ -50,7 +45,7 @@ testStreamEventsValidation =
           False
 
 
-        isKinesisEvent (Right (S.KinesisEvent _ _ _ _)) =
+        isKinesisEvent (Right S.KinesisEvent{}) =
           True
 
         isKinesisEvent _ =
