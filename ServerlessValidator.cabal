@@ -19,9 +19,9 @@ library
   build-depends:       base >= 4.7 && < 5
                      , protolude >= 0.1.10 && < 0.1.11
                      , text >= 1.2.2.1 && < 1.2.3
-                     , aeson >= 0.11.2.1 && < 1.0.0.0
-                     , yaml >= 0.8.21.1 && < 0.8.22.0
-                     , unordered-containers >= 0.2.7.2 && < 0.2.8.0
+                     , aeson == 1.1.2.*
+                     , yaml == 0.8.*
+                     , unordered-containers == 0.2.8.*
                      , case-insensitive >= 1.2.0.7 && < 1.2.1.0
                      , regex-compat >= 0.95.1 && < 0.96
   ghc-options:         -threaded
@@ -29,7 +29,8 @@ library
                        -with-rtsopts=-N
                        -Wall
   default-language:    Haskell2010
-  default-extensions:  OverloadedStrings, NoImplicitPrelude
+  default-extensions:  OverloadedStrings
+                     , NoImplicitPrelude
 
 executable ServerlessValidator
   hs-source-dirs:      app
@@ -42,7 +43,8 @@ executable ServerlessValidator
                      , ServerlessValidator
                      , protolude >= 0.1.10 && < 0.1.11
   default-language:    Haskell2010
-  default-extensions:  OverloadedStrings, NoImplicitPrelude
+  default-extensions:  OverloadedStrings
+                     , NoImplicitPrelude
 
 test-suite ServerlessValidator-test
   type:                exitcode-stdio-1.0
@@ -52,14 +54,15 @@ test-suite ServerlessValidator-test
                      , ServerlessValidator
                      , protolude >= 0.1.10 && < 0.1.11
                      , hspec >= 2.2.4 && < 2.3.0
-                     , aeson >= 0.11.2.1 && < 1.0.0.0
+                     , aeson
                      , QuickCheck
   ghc-options:         -threaded
                        -rtsopts
                        -with-rtsopts=-N
                        -Wall
   default-language:    Haskell2010
-  default-extensions:  OverloadedStrings, NoImplicitPrelude
+  default-extensions:  OverloadedStrings
+                     , NoImplicitPrelude
 
 source-repository head
   type:     git
