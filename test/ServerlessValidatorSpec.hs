@@ -11,17 +11,12 @@ import qualified Data.Maybe as Maybe (fromJust)
 
 spec :: Spec
 spec =
-  do
-    describe "Serverless Validator" $ do
-      it "validates framework version" testFrameworkVersionValidation
-
-      it "validates λ function runtimes" testRuntimeValidation
-
-      it "validates S3 events arn" testS3EventsValidation
-
-      it "validates stream events" $ testStreamEventsValidation
-
-      it "validates SNS events" $ testSnsEventsValidation
+  describe "Serverless Validator" $ do
+    it "validates framework version" testFrameworkVersionValidation
+    it "validates λ function runtimes" testRuntimeValidation
+    it "validates S3 events arn" testS3EventsValidation
+    it "validates stream events" testStreamEventsValidation
+    it "validates SNS events" testSnsEventsValidation
 
 
 testSnsEventsValidation :: Expectation
@@ -50,7 +45,7 @@ testStreamEventsValidation =
           False
 
 
-        isKinesisEvent (Right (S.KinesisEvent _ _ _ _)) =
+        isKinesisEvent (Right S.KinesisEvent{}) =
           True
 
         isKinesisEvent _ =
@@ -98,8 +93,8 @@ testFrameworkVersionValidation =
     decode ">=2.0.0 <1.0.0" `shouldSatisfy` isLeft
     decode ">=1.0.0 <2.0.0" `shouldBe` fv
       where
-        decode fv =
-          eitherDecode ("\"" <> fv <> "\"") :: Either String S.FrameworkVersion
+        decode ver =
+          eitherDecode ("\"" <> ver <> "\"") :: Either String S.FrameworkVersion
 
         fv =
           Right S.FV { S.frameworkVersionMin = Maybe.fromJust . S.toSemVer $ "1.0.0"

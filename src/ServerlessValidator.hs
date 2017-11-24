@@ -1,6 +1,6 @@
 #!/usr/bin/env stack
 {- stack
- --resolver lts-7.15
+ --resolver lts-9.14
  --install-ghc runghc
  --package base
  --package protolude
@@ -16,7 +16,7 @@
 
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NoImplicitPrelude #-}
-
+{-# OPTIONS_GHC -fno-warn-unused-top-binds #-}
 -- Serverless.yml reference: https://serverless.com/framework/docs/providers/aws/guide/serverless.yml/
 module ServerlessValidator ( main
                            , toSemVer
@@ -27,7 +27,6 @@ module ServerlessValidator ( main
                            )
 where
 
-import GHC.Base (id)
 import GHC.Show (show)
 import Protolude hiding (Prefix, show)
 import Data.Text (Text)
@@ -43,7 +42,7 @@ import qualified Data.Text.Lazy as TL (fromStrict, unpack, toStrict)
 import qualified Data.CaseInsensitive as CI (mk)
 import qualified System.Environment as S (getArgs)
 import qualified Text.Regex as Regex (mkRegex, matchRegex)
-import qualified Data.Maybe as Maybe (fromJust, isJust, maybe)
+import qualified Data.Maybe as Maybe (fromJust, isJust, fromMaybe)
 import qualified Data.Text.Lazy.Builder as TLB (toLazyText, fromString)
 
 
@@ -66,11 +65,11 @@ data Serverless
 
 mkServerless :: ServiceName -> Maybe FrameworkVersion -> Provider -> Functions -> Either ErrorMsg Serverless
 mkServerless s fv p fs =
-  Right $ S { service = s
-            , frameworkVersion = Maybe.maybe frameworkVersionLatestSupported id fv
-            , provider = p
-            , functions = fs
-            }
+  Right S { service = s
+          , frameworkVersion = Maybe.fromMaybe frameworkVersionLatestSupported fv
+          , provider = p
+          , functions = fs
+          }
 
 
 instance FromJSON Serverless where
@@ -109,12 +108,9 @@ mkFrameworkVersion version =
           maxSemVer =
             toSemVer $ T.pack maxVer
         in
-          case all Maybe.isJust [minSemVer, maxSemVer] of
-            True ->
-              validateFrameworkVersionRange (Maybe.fromJust minSemVer) (Maybe.fromJust maxSemVer)
-
-            False ->
-              Left "Framework version must be a string of the form: >=x.x.x <x.x.x"
+          if all Maybe.isJust [minSemVer, maxSemVer]
+          then validateFrameworkVersionRange (Maybe.fromJust minSemVer) (Maybe.fromJust maxSemVer)
+          else Left "Framework version must be a string of the form: >=x.x.x <x.x.x"
 
       _ ->
         Left "Framework version must be a string of the form: >=x.x.x <x.x.x"
@@ -148,7 +144,7 @@ validateFrameworkVersionRange minSV maxSV  =
           GT ->
             let
               err =
-                TLB.toLazyText $ "Maximum version '" <> (TLB.fromString $ show maxSV) <> "' is not supported, '" <> (TLB.fromString $ show frameworkVersionMaxSupported) <> "' the maximum supported version (exclusive)"
+                TLB.toLazyText $ "Maximum version '" <> TLB.fromString (show maxSV) <> "' is not supported, '" <> TLB.fromString (show frameworkVersionMaxSupported) <> "' the maximum supported version (exclusive)"
             in
               Left . TL.toStrict $ err
 
@@ -158,7 +154,7 @@ validateFrameworkVersionRange minSV maxSV  =
                      }
   where
     minimumVersionNotSupported =
-      TL.toStrict (TLB.toLazyText $ "Minimum version '" <> (TLB.fromString $ show minSV) <> "' is not supported, '" <> (TLB.fromString $ show frameworkVersionMinSupported) <> "' is the minimum supported version (inclusive)")
+      TL.toStrict (TLB.toLazyText $ "Minimum version '" <> TLB.fromString (show minSV) <> "' is not supported, '" <> TLB.fromString (show frameworkVersionMinSupported) <> "' is the minimum supported version (inclusive)")
 
 
 instance FromJSON FrameworkVersion where
@@ -218,10 +214,10 @@ toSemVer :: Text -> Maybe SemVer
 toSemVer t =
   case map (TLR.decimal . TL.fromStrict) $ T.splitOn "." t of
     [Right (major, _), Right (minor, _), Right (patch, _)] ->
-      Just $ SemVer { svMajor = major
-                    , svMinor = minor
-                    , svPatch = patch
-                    }
+      Just SemVer { svMajor = major
+                  , svMinor = minor
+                  , svPatch = patch
+                  }
 
     _ ->
       Nothing
@@ -288,14 +284,13 @@ newtype Functions =
 
 
 instance FromJSON Functions where
-  parseJSON value =
-    withObject "Functions" parseFunctions value
-
+  parseJSON =
+    withObject "Functions" parseFunctions
     where
       parseFunctions :: Object -> Parser Functions
       parseFunctions fObj =
         -- fmap  FS . for (Map.toList fObj) $ \(n, b) -> parseFunction n b
-        fmap FS (for (Map.toList fObj) $ \(n, b) -> parseFunction n b)
+        fmap FS (for (Map.toList fObj) $ uncurry parseFunction)
 
 
 data Function =
@@ -317,8 +312,8 @@ type FunctionName =
 
 
 parseFunction :: FunctionName -> Value -> Parser Function
-parseFunction fName fBody =
-  withObject "Function" parseFunctionBody fBody
+parseFunction fName =
+  withObject "Function" parseFunctionBody
 
   where
     parseFunctionBody :: Object -> Parser Function
@@ -396,7 +391,7 @@ data ScheduleEventInputStageParams =
 
 instance FromJSON ScheduleEventInputStageParams where
   parseJSON (String str) =
-    return $ SEISP { stage = str }
+    return SEISP { stage = str }
 
   parseJSON invalid =
     typeMismatch "Schedule Event Stage" invalid
@@ -521,23 +516,25 @@ validArn awsSer arn =
 
 
 mkDynamoDBEvent :: Arn -> Either Text Event
-mkDynamoDBEvent arn | not . (validArn DynamoDB) $ arn =
-                      Left $ "'" <> arn <> "' is not a valid " <> T.pack(show DynamoDB) <> " arn"
+mkDynamoDBEvent arn
+  | not . validArn DynamoDB $ arn =
+      Left $ "'" <> arn <> "' is not a valid " <> T.pack (show DynamoDB) <> " arn"
 
 mkDynamoDBEvent arn =
-  Right $ DynamoDBEvent { dynamoDBArn = arn }
+  Right DynamoDBEvent { dynamoDBArn = arn }
 
 
 mkKinesisEvent :: Arn -> Int -> Text -> Bool -> Either Text Event
-mkKinesisEvent arn _ _ _ | not . (validArn Kinesis) $ arn =
-                           Left $ "'" <> arn <> "' is not a valid " <> T.pack(show Kinesis) <> " arn"
+mkKinesisEvent arn _ _ _
+  | not . validArn Kinesis $ arn =
+      Left $ "'" <> arn <> "' is not a valid " <> T.pack (show Kinesis) <> " arn"
 
 mkKinesisEvent arn batchSize startingPosition enabled =
-  Right $ KinesisEvent { kinesisArn = arn
-                       , kinesisBatchSize = batchSize
-                       , kinesisStartingPosition = startingPosition
-                       , kinesisEnabled = enabled
-                       }
+  Right KinesisEvent { kinesisArn = arn
+                     , kinesisBatchSize = batchSize
+                     , kinesisStartingPosition = startingPosition
+                     , kinesisEnabled = enabled
+                     }
 
 
 parseStreamEvent :: Value -> Parser Event
@@ -617,10 +614,10 @@ mkS3Event _ event _ | invalidArn =
       not . isValidS3EventArn $ event
 
 mkS3Event bucket event rules =
-  Right $ S3Event { s3EventBucket = bucket
-                  , s3EventEvent = event
-                  , s3EventRules = rules
-                  }
+  Right S3Event { s3EventBucket = bucket
+                , s3EventEvent = event
+                , s3EventRules = rules
+                }
 
 parseS3Event :: Value -> Parser Event
 parseS3Event (Object o) =
@@ -639,7 +636,7 @@ type S3EventArn =
 -- http://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html#notification-how-to-event-types-and-destinations
 isValidS3EventArn :: S3EventArn -> Bool
 isValidS3EventArn event =
-  Maybe.maybe False (\_ -> True) $ Regex.matchRegex s3EventArnRegex (T.unpack event)
+  Maybe.isJust $ Regex.matchRegex s3EventArnRegex (T.unpack event)
   where
     -- see TODO[1]
     s3EventArnRegex =
@@ -671,9 +668,9 @@ type HttpEventConfig =
 
 mkHttpEventFromString :: HttpEventConfig -> Either ErrorMsg Event
 mkHttpEventFromString config =
-  case (T.splitOn " " config) of
+  case T.splitOn " " config of
     [httpMethodStr, httpEndpoint] ->
-      case toHttpMethod $ httpMethodStr of
+      case toHttpMethod httpMethodStr of
         Right m ->
           Right $ mkHttpEvent httpEndpoint m Nothing Nothing
 
@@ -729,8 +726,8 @@ instance FromJSON HttpMethod where
 
 
 parse :: FilePath -> IO (Either ParseException Serverless)
-parse f =
-  YML.decodeFileEither f
+parse =
+  YML.decodeFileEither
 
 
 main :: IO ()

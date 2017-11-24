@@ -1,12 +1,15 @@
 ## -*- docker-image-name: "serverless-validator" -*-
-FROM haskell:latest
+FROM futtetennista/serverless-validator-builder as builder
 
-RUN stack --resolver lts-7.15 \
-    --install-ghc \
-    install base protolude text aeson yaml unordered-containers case-insensitive regex-compat
+WORKDIR "/home/serverless-validator/"
 
-COPY src/ServerlessValidator.hs /usr/local/bin/serverless-validator.hs
+COPY . .
 
-WORKDIR "/tmp"
+RUN stack --resolver lts-9.14 install
 
-ENTRYPOINT ["/usr/local/bin/serverless-validator.hs"]
+
+FROM fpco/haskell-scratch:integer-gmp
+
+COPY --from=builder /root/.local/bin/serverless-validator /bin/
+
+ENTRYPOINT ["/bin/serverless-validator"]
