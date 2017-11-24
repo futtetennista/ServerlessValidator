@@ -1,6 +1,6 @@
 #!/usr/bin/env stack
 {- stack
- --resolver lts-7.15
+ --resolver lts-9.14
  --install-ghc runghc
  --package base
  --package protolude
@@ -42,7 +42,7 @@ import qualified Data.Text.Lazy as TL (fromStrict, unpack, toStrict)
 import qualified Data.CaseInsensitive as CI (mk)
 import qualified System.Environment as S (getArgs)
 import qualified Text.Regex as Regex (mkRegex, matchRegex)
-import qualified Data.Maybe as Maybe (fromJust, isJust, fromMaybe, maybe)
+import qualified Data.Maybe as Maybe (fromJust, isJust, fromMaybe)
 import qualified Data.Text.Lazy.Builder as TLB (toLazyText, fromString)
 
 
