@@ -1,5 +1,5 @@
 name:                ServerlessValidator
-version:             0.1.0.0
+version:             0.1.0.1
 synopsis:            Validator for serverless.yml files
 description:         Please see README.md
 homepage:            https://github.com/futtetennista/ServerlessValidator#readme

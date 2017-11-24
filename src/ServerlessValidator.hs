@@ -739,7 +739,7 @@ main =
     --            ]
     case args of
       [] ->
-        print $ T.pack "Usage: ./serverless-validator.hs /path/to/serverless.yml [/path/to/another/serverless.yml]"
+        print $ T.pack "Usage: ./serverless-validator /path/to/serverless.yml [/path/to/another/serverless.yml]"
 
       xs ->
         forM_ xs checkFile
