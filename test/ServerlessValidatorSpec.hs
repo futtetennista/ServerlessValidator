@@ -11,7 +11,7 @@ import qualified Data.Maybe as Maybe (fromJust)
 
 spec :: Spec
 spec =
-  describe "Serverless Validator" $
+  describe "Serverless Validator" $ do
     it "validates framework version" testFrameworkVersionValidation
     it "validates λ function runtimes" testRuntimeValidation
     it "validates S3 events arn" testS3EventsValidation
@@ -93,8 +93,8 @@ testFrameworkVersionValidation =
     decode ">=2.0.0 <1.0.0" `shouldSatisfy` isLeft
     decode ">=1.0.0 <2.0.0" `shouldBe` fv
       where
-        decode fv =
-          eitherDecode ("\"" <> fv <> "\"") :: Either String S.FrameworkVersion
+        decode ver =
+          eitherDecode ("\"" <> ver <> "\"") :: Either String S.FrameworkVersion
 
         fv =
           Right S.FV { S.frameworkVersionMin = Maybe.fromJust . S.toSemVer $ "1.0.0"

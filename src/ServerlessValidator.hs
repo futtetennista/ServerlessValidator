@@ -16,7 +16,7 @@
 
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NoImplicitPrelude #-}
-
+{-# OPTIONS_GHC -fno-warn-unused-top-binds #-}
 -- Serverless.yml reference: https://serverless.com/framework/docs/providers/aws/guide/serverless.yml/
 module ServerlessValidator ( main
                            , toSemVer
