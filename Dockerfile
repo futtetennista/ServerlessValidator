@@ -1,30 +1,15 @@
 ## -*- docker-image-name: "serverless-validator" -*-
-FROM haskell:8.2 as builder
+FROM futtetennista/serverless-validator-builder as builder
 
-WORKDIR "/home/"
+WORKDIR "/home/serverless-validator/"
 
-RUN apt-get update
-RUN apt-get install --yes xz-utils make
+COPY . .
 
-RUN stack --resolver lts-9.14 \
-    --install-ghc \
-    install base \
-            protolude \
-            text \
-            aeson \
-            yaml \
-            unordered-containers \
-            case-insensitive \
-            regex-compat
-
-COPY src/ServerlessValidator.hs ./serverless-validator.hs
+RUN stack --resolver lts-9.14 install
 
 
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
+FROM fpco/haskell-scratch:integer-gmp
 
-WORKDIR /usr/local/bin
+COPY --from=builder /root/.local/bin/serverless-validator /bin/
 
-COPY --from=builder /home/serverless-validator.hs  .
-
-ENTRYPOINT ["./serverless-validator.hs"]
+ENTRYPOINT ["/bin/serverless-validator"]

@@ -32,7 +32,7 @@ library
   default-extensions:  OverloadedStrings
                      , NoImplicitPrelude
 
-executable ServerlessValidator
+executable serverless-validator
   hs-source-dirs:      app
   main-is:             Main.hs
   ghc-options:         -threaded
@@ -46,7 +46,7 @@ executable ServerlessValidator
   default-extensions:  OverloadedStrings
                      , NoImplicitPrelude
 
-test-suite ServerlessValidator-test
+test-suite test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Spec.hs
