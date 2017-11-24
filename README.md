@@ -15,7 +15,12 @@ AesonException "Error in $.provider.runtime: failed to parse field provider: fai
 
 ## Usage with Docker
 
-If haskell, stack etc. are not installed on your system, then docker comes to the rescue. Build the image using the `Dockerfile` using something like `docker build -t serverless-validator .` and then run it with `docker run -it --rm -v $(pwd):/tmp serveless-validator path/relative/to/the/current/path/to/serverless.yml`. Beware: the size of the docker image is an outrageous 1.8 GB!!!
+A Docker executable image is available on Docker Hub, just download it and run it against you `serverless.yml` file: 
+
+``` sh 
+docker pull futtetennista/serverless-validator
+docker run --rm -v=$(pwd):/tmp -w=/tmp serveless-validator path/to/serverless.yml
+```
 
 ## Licence
 
