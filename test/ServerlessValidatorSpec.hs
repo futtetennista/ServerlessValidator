@@ -66,6 +66,7 @@ testRuntimeValidation =
     decode "java8" `shouldBe` Right S.Java
     decode "python2.7" `shouldBe` Right S.Python
     decode "nodejs4.3" `shouldBe` Right S.NodeJs
+    decode "nodejs6.10" `shouldBe` Right S.NodeJs
     decode "foobar" `shouldSatisfy` isLeft
       where
         decode rt =
