@@ -699,6 +699,9 @@ toHttpMethod httpMethodStr =
     "get" ->
       Right Get
 
+    "patch" ->
+      Right Patch
+
     "post" ->
       Right Post
 
