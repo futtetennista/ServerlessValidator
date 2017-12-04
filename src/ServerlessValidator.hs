@@ -231,6 +231,9 @@ data Runtime
 
 
 mkRuntime :: Text -> Either ErrorMsg Runtime
+mkRuntime "nodejs6.10" =
+  Right NodeJs
+
 mkRuntime "nodejs4.3" =
   Right NodeJs
 
@@ -241,7 +244,7 @@ mkRuntime "python2.7" =
   Right Python
 
 mkRuntime unknown =
-  Left $ "Unsupported runtime '" <> unknown <> "'. Choose one among: 'nodejs4.3', 'java8', 'python2.8'"
+  Left $ "Unsupported runtime '" <> unknown <> "'. Choose one among: 'nodejs6.10', 'nodejs4.3', 'java8', 'python2.8'"
 
 
 instance FromJSON Runtime where
